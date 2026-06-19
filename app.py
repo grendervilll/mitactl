@@ -2,7 +2,7 @@
 """
 mita Web Panel — Flask backend
 """
-import os, json, subprocess, secrets, string, random, ipaddress, socket
+import os, json, subprocess, secrets, string, random, ipaddress, socket, time
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -81,7 +81,44 @@ def load_mita_config():
 
 def save_mita_config(cfg):
     Path(MITA_CONFIG).write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    _apply_mita_config_safe()
+
+def _apply_mita_config_safe():
+    """Apply mita config and restart the service.
+    Mirrors the shell _apply_mita_config logic: starts mita temporarily if stopped,
+    so mita apply config (which requires a running daemon) always succeeds."""
+    bg_proc = None
+    mita_was_stopped = False
+
+    if not _mita_running():
+        # Remove stale binary config so mita starts without a config
+        pb = Path("/etc/mita/server.conf.pb")
+        try:
+            pb.unlink(missing_ok=True)
+        except Exception:
+            pass
+        subprocess.run(["systemctl", "reset-failed", "mita"], capture_output=True)
+        # Start mita daemon in background so we can call `mita apply config`
+        bg_proc = subprocess.Popen(
+            ["/usr/bin/mita", "run"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        time.sleep(2)
+        mita_was_stopped = True
+
     subprocess.run(["mita", "apply", "config", MITA_CONFIG], capture_output=True)
+
+    if mita_was_stopped and bg_proc is not None:
+        bg_proc.terminate()
+        try:
+            bg_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            bg_proc.kill()
+        time.sleep(1)
+
+    # Restart the systemd service so it picks up the newly written .pb config
+    subprocess.run(["systemctl", "reset-failed", "mita"], capture_output=True)
+    subprocess.run(["systemctl", "restart", "mita"], capture_output=True)
 
 def mita_cmd(*args):
     r = subprocess.run(["mita", *args], capture_output=True, text=True)

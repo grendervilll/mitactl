@@ -150,7 +150,6 @@
   </div>
 </div>
 
-{% endblock %}
 <!-- SECURITY / FAIL2BAN -->
 <div class="page" id="page-security">
   <h1>Безопасность</h1>
@@ -182,7 +181,7 @@
       </div>
       <div class="form-group" style="max-width:220px">
         <label>Время блокировки</label>
-        <select id="f2b-bantime" onchange="toggleCustomBantime()">
+        <select id="f2b-bantime" onchange="toggleCustomBantime(this.value)">
           <option value="300">5 минут</option>
           <option value="900">15 минут</option>
           <option value="1800">30 минут</option>
@@ -210,7 +209,7 @@
   </div>
 </div>
 
-
+{% endblock %}
 
 {% block scripts %}
 <script>
@@ -697,10 +696,10 @@ function fmtSeconds(s) {
   return s + ' сек.';
 }
 
-document.getElementById('f2b-bantime').addEventListener('change', function() {
+function toggleCustomBantime(val) {
   document.getElementById('custom-bantime-group').style.display =
-    this.value === '0' ? '' : 'none';
-});
+    val === '0' ? '' : 'none';
+}
 
 function applyPreset(maxRetry, banTime) {
   document.getElementById('f2b-maxretry').value = maxRetry;

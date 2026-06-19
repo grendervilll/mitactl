@@ -1088,6 +1088,31 @@ menu_uninstall() {
   echo ""
   section "Удаление в процессе..."
 
+  # ── 0. Сохраняем порты до удаления файлов ──────────────────────
+  # Читаем параметры заранее — файлы конфигурации удалим позже
+  _MITA_RANGE="2100-2110"
+  if [[ -f "$MITA_CONFIG" ]]; then
+    _MITA_RANGE=$(python3 -c "
+import json
+try:
+    with open('$MITA_CONFIG') as f: d=json.load(f)
+    b=d.get('portBindings',[{}])[0]
+    print(b.get('portRange',str(b.get('port','2100-2110'))))
+except: print('2100-2110')
+" 2>/dev/null || echo "2100-2110")
+  fi
+
+  _PANEL_PORT="8080"
+  [[ -f "$PANEL_ENV" ]] && _PANEL_PORT=$(grep "^PANEL_PORT=" "$PANEL_ENV" | cut -d= -f2 || echo "8080")
+  _PANEL_PORT=${_PANEL_PORT:-8080}
+
+  # Автодетект текущего SSH порта из sshd_config (чтобы не трогать его при чистке)
+  _SSH_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+  _SSH_PORT=${_SSH_PORT:-22}
+  info "Обнаружен SSH порт: $_SSH_PORT (будет сохранён)"
+  info "Порты mita для закрытия: $_MITA_RANGE"
+  info "Порт панели для закрытия: $_PANEL_PORT"
+
   # ── 1. Остановить и удалить веб-панель ─────────────────────────
   info "Остановка mita-panel..."
   systemctl stop mita-panel 2>/dev/null || true
@@ -1164,14 +1189,47 @@ menu_uninstall() {
   rm -f /usr/local/bin/mita-update-lists
   ok "Cron-задачи удалены"
 
-  # ── 8. Закрыть порты в firewall (best-effort) ──────────────────
-  info "Откат правил firewall (порты mita/панели)..."
-  if command -v ufw &>/dev/null; then
+  # ── 8. Закрыть порты в firewall ────────────────────────────────
+  info "Закрытие портов mita ($_MITA_RANGE) и панели ($_PANEL_PORT) в firewall..."
+  info "SSH порт $_SSH_PORT остаётся открытым."
+
+  # ---- UFW ----
+  if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    # Удаляем правило mita (диапазон или одиночный порт)
+    if [[ "$_MITA_RANGE" == *"-"* ]]; then
+      _SP="${_MITA_RANGE%-*}"; _EP="${_MITA_RANGE#*-}"
+      ufw delete allow "${_SP}:${_EP}/tcp" 2>/dev/null || true
+      ufw delete allow "${_SP}:${_EP}/udp" 2>/dev/null || true
+    else
+      ufw delete allow "$_MITA_RANGE/tcp" 2>/dev/null || true
+      ufw delete allow "$_MITA_RANGE/udp" 2>/dev/null || true
+    fi
+    # Удаляем правило панели
+    ufw delete allow "$_PANEL_PORT/tcp" 2>/dev/null || true
+    # Дополнительно: чистим правила по комментарию (совместимость с разными версиями)
     ufw status numbered 2>/dev/null | grep -iE "mita|panel" | awk -F'[][]' '{print $2}' | sort -rn | while read -r num; do
       [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
     done
+    ok "UFW: правила удалены"
   fi
-  ok "Правила firewall обработаны (проверьте 'ufw status' вручную при необходимости)"
+
+  # ---- iptables ----
+  if command -v iptables &>/dev/null; then
+    if [[ "$_MITA_RANGE" == *"-"* ]]; then
+      _SP="${_MITA_RANGE%-*}"; _EP="${_MITA_RANGE#*-}"
+      iptables -D INPUT -p tcp --dport "${_SP}:${_EP}" -j ACCEPT 2>/dev/null || true
+      iptables -D INPUT -p udp --dport "${_SP}:${_EP}" -j ACCEPT 2>/dev/null || true
+    else
+      iptables -D INPUT -p tcp --dport "$_MITA_RANGE" -j ACCEPT 2>/dev/null || true
+      iptables -D INPUT -p udp --dport "$_MITA_RANGE" -j ACCEPT 2>/dev/null || true
+    fi
+    iptables -D INPUT -p tcp --dport "$_PANEL_PORT" -j ACCEPT 2>/dev/null || true
+    # Сохраняем правила если есть iptables-save
+    command -v iptables-save &>/dev/null && iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    ok "iptables: правила удалены"
+  fi
+
+  ok "Firewall: порты mita и панели закрыты. SSH ($_SSH_PORT) не тронут."
 
   systemctl daemon-reload 2>/dev/null || true
 
