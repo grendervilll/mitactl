@@ -393,6 +393,12 @@ async function showConfig(name){
           cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">
         sing-box / Karing
       </button>
+      <button id="${tid}_tab_qr"
+        onclick="switchConfigTab('${tid}','qr')"
+        style="padding:8px 18px;font-size:.85rem;font-weight:600;border:none;background:none;
+          cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">
+        QR-код
+      </button>
     </div>
 
     <!-- mieru tab -->
@@ -431,8 +437,34 @@ async function showConfig(name){
         </div>
       </div>
     </div>
+
+    <!-- QR tab -->
+    <div id="${tid}_pane_qr" style="display:none">
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:16px;line-height:1.6">
+        Отсканируйте QR-код на телефоне, чтобы скопировать конфиг без ручного набора.<br>
+        <strong style="color:var(--text)">mieru JSON</strong> — для официального клиента mieru.<br>
+        <strong style="color:var(--text)">sing-box JSON</strong> — для Karing, Hiddify, NekoBox (конфиг большой, качество ниже).
+      </p>
+
+      <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
+        <div style="text-align:center">
+          <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.6px;
+            color:var(--muted);margin-bottom:10px">mieru JSON</div>
+          <div id="${tid}_qr_mieru" style="background:#fff;padding:10px;border-radius:10px;display:inline-block"></div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.6px;
+            color:var(--muted);margin-bottom:10px">sing-box JSON</div>
+          <div id="${tid}_qr_singbox" style="background:#fff;padding:10px;border-radius:10px;display:inline-block"></div>
+          <div id="${tid}_qr_singbox_warn" style="display:none;font-size:.75rem;color:var(--warn);margin-top:6px;max-width:220px">
+            ⚠ Конфиг слишком большой для QR — используйте кнопку «Скачать singbox.json»
+          </div>
+        </div>
+      </div>
+    </div>
   `;
   openModal('Конфиг: '+name, html);
+  setTimeout(() => _renderConfigQR(tid, d), 0);
 }
 
 function karingManualInstructions(d){
@@ -495,7 +527,7 @@ function karingManualInstructions(d){
 }
 
 function switchConfigTab(tid, tab) {
-  ['mieru','singbox'].forEach(t => {
+  ['mieru','singbox','qr'].forEach(t => {
     const isActive = t === tab;
     const btn  = document.getElementById(tid+'_tab_'+t);
     const pane = document.getElementById(tid+'_pane_'+t);
@@ -504,6 +536,38 @@ function switchConfigTab(tid, tab) {
     btn.style.color             = isActive ? 'var(--accent)' : 'var(--muted)';
     pane.style.display          = isActive ? '' : 'none';
   });
+}
+
+function _renderConfigQR(tid, d) {
+  const QR_MAX = 2953; // QR Version 40-L binary limit
+
+  function makeQR(elId, text, warnElId) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (text.length > QR_MAX) {
+      el.style.display = 'none';
+      const warn = document.getElementById(warnElId);
+      if (warn) warn.style.display = 'block';
+      return;
+    }
+    try {
+      new QRCode(el, {
+        text,
+        width: 220,
+        height: 220,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.L
+      });
+    } catch(e) {
+      el.style.display = 'none';
+      const warn = document.getElementById(warnElId);
+      if (warn) { warn.style.display = 'block'; warn.textContent = '⚠ Не удалось создать QR: ' + e.message; }
+    }
+  }
+
+  makeQR(tid+'_qr_mieru',   JSON.stringify(d.client_config),  null);
+  makeQR(tid+'_qr_singbox', JSON.stringify(d.singbox_config), tid+'_qr_singbox_warn');
 }
 
 async function deleteUser(name){
