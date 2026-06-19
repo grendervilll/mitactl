@@ -9,7 +9,7 @@ Tested and works perfectly on Ubuntu 24.04. Operation on other distributions is 
 
 
 ### Установка/Installation
-`curl -Ls https://raw.githubusercontent.com/grendervilll/mitactl/main/bootstrap.sh | sudo bash`
+`curl -Ls https://raw.githubusercontent.com/grendervilll/mitactl/main/bootstrap.sh -o /tmp/bootstrap.sh && sudo bash /tmp/bootstrap.sh`
 
 
 
