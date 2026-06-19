@@ -124,11 +124,13 @@ apt-get update -qq || { warn "apt-get update завершился с ошибк�
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   curl wget jq cron \
   ca-certificates gnupg lsb-release \
-  iptables ipset ufw iptables-persistent \
+  iptables ufw \
   fail2ban openssl \
   net-tools \
   python3 python3-yaml \
   || error "Ошибка установки зависимостей. Запустите вручную: apt-get install -y curl wget jq cron iptables ufw fail2ban python3 python3-yaml"
+# ipset и iptables-persistent — опциональные, не прерываем при ошибке
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ipset iptables-persistent 2>/dev/null || true
 ok "Базовые пакеты установлены (включая fail2ban, ufw, ipset, iptables-persistent, python3-yaml)"
 
 # =============================================================================
