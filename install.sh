@@ -121,15 +121,15 @@ fi
 section "Установка зависимостей"
 
 apt-get update -qq
-apt-get install -y -qq \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   curl wget jq cron \
   ca-certificates gnupg lsb-release \
-  iptables ipset ufw \
+  iptables ipset ufw iptables-persistent \
   fail2ban openssl \
   net-tools \
   python3 python3-yaml \
   2>/dev/null
-ok "Базовые пакеты установлены (включая fail2ban, ufw, ipset, python3-yaml)"
+ok "Базовые пакеты установлены (включая fail2ban, ufw, ipset, iptables-persistent, python3-yaml)"
 
 # =============================================================================
 # УСТАНОВКА MITA
