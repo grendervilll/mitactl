@@ -171,7 +171,19 @@ function showToast(msg,isErr=false){
   t.textContent=msg;t.style.color=isErr?'var(--danger)':'var(--ok)';
   t.style.display='block';setTimeout(()=>t.style.display='none',2500);
 }
-function copyText(text){navigator.clipboard.writeText(text).then(()=>showToast('Скопировано ✓'));}
+function copyText(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>showToast('Скопировано ✓')).catch(()=>_copyFallback(text));
+  }else{_copyFallback(text);}
+}
+function _copyFallback(text){
+  const ta=document.createElement('textarea');
+  ta.value=text;ta.style.cssText='position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  try{document.execCommand('copy');showToast('Скопировано ✓');}
+  catch(e){showToast('Ошибка копирования',true);}
+  document.body.removeChild(ta);
+}
 function toggleAccordion(hdr){
   hdr.classList.toggle('aopen');
   hdr.nextElementSibling.classList.toggle('open');

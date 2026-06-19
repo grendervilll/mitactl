@@ -743,7 +743,7 @@ function codeBlock(json){
   const txt=JSON.stringify(json,null,2);
   const id='cb'+Math.random().toString(36).slice(2);
   return `<div class="code-block" id="${id}">${escH(txt)}</div>
-    <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById('${id}').textContent).then(()=>showToast('Скопировано ✓'))">Копировать</button>`;
+    <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="copyText(document.getElementById('${id}').textContent)">Копировать</button>`;
 }
 </script>
 {% endblock %}

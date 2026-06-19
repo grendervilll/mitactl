@@ -2,10 +2,13 @@
 """
 mita Web Panel — Flask backend
 """
-import os, json, subprocess, secrets, string, random, ipaddress, socket, time
+import os, json, subprocess, secrets, string, random, ipaddress, socket, time, logging
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 
 from flask import (Flask, render_template, request, jsonify,
                    session, redirect, url_for, abort)
@@ -83,30 +86,36 @@ def save_mita_config(cfg):
     Path(MITA_CONFIG).write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
     _apply_mita_config_safe()
 
+_log = logging.getLogger("mita_panel")
+
 def _apply_mita_config_safe():
     """Apply mita config and restart the service.
     Mirrors the shell _apply_mita_config logic: starts mita temporarily if stopped,
     so mita apply config (which requires a running daemon) always succeeds."""
+
     bg_proc = None
     mita_was_stopped = False
 
     if not _mita_running():
-        # Remove stale binary config so mita starts without a config
         pb = Path("/etc/mita/server.conf.pb")
         try:
             pb.unlink(missing_ok=True)
         except Exception:
             pass
         subprocess.run(["systemctl", "reset-failed", "mita"], capture_output=True)
-        # Start mita daemon in background so we can call `mita apply config`
         bg_proc = subprocess.Popen(
             ["/usr/bin/mita", "run"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        time.sleep(2)
+        # Installer uses sleep 3 — give mita enough time to open its RPC socket
+        time.sleep(3)
         mita_was_stopped = True
 
-    subprocess.run(["mita", "apply", "config", MITA_CONFIG], capture_output=True)
+    r = subprocess.run(["mita", "apply", "config", MITA_CONFIG],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        _log.error("mita apply config failed (rc=%d): %s %s",
+                  r.returncode, r.stdout.strip(), r.stderr.strip())
 
     if mita_was_stopped and bg_proc is not None:
         bg_proc.terminate()
@@ -116,9 +125,16 @@ def _apply_mita_config_safe():
             bg_proc.kill()
         time.sleep(1)
 
-    # Restart the systemd service so it picks up the newly written .pb config
+    # Fix ownership so the mita systemd service (runs as mita user) can read the .pb
+    pb = Path("/etc/mita/server.conf.pb")
+    if pb.exists():
+        subprocess.run(["chown", "mita:mita", str(pb)], capture_output=True)
+
     subprocess.run(["systemctl", "reset-failed", "mita"], capture_output=True)
-    subprocess.run(["systemctl", "restart", "mita"], capture_output=True)
+    rs = subprocess.run(["systemctl", "restart", "mita"], capture_output=True, text=True)
+    if rs.returncode != 0:
+        _log.error("systemctl restart mita failed (rc=%d): %s %s",
+                  rs.returncode, rs.stdout.strip(), rs.stderr.strip())
 
 def mita_cmd(*args):
     r = subprocess.run(["mita", *args], capture_output=True, text=True)
@@ -976,4 +992,39 @@ def api_user_config_download():
         mimetype="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.route(f"{BASE}/api/mita/apply", methods=["POST"])
+@login_required
+def api_mita_apply():
+    """Диагностика: вручную применить конфиг mita и вернуть подробный результат."""
+    mita_running = _mita_running()
+    pb = Path("/etc/mita/server.conf.pb")
+    pb_exists_before = pb.exists()
+
+    r = subprocess.run(["mita", "apply", "config", MITA_CONFIG],
+                       capture_output=True, text=True)
+    pb_exists_after = pb.exists()
+
+    # Chown после apply — нужно если .pb создавался root'ом
+    chown_result = None
+    if pb_exists_after:
+        cr = subprocess.run(["chown", "mita:mita", str(pb)], capture_output=True, text=True)
+        chown_result = {"rc": cr.returncode, "err": cr.stderr.strip()}
+
+    rs = subprocess.run(["systemctl", "restart", "mita"], capture_output=True, text=True)
+
+    cfg = load_mita_config()
+    return jsonify({
+        "mita_was_running":    mita_running,
+        "apply_rc":            r.returncode,
+        "apply_stdout":        r.stdout.strip(),
+        "apply_stderr":        r.stderr.strip(),
+        "pb_existed_before":   pb_exists_before,
+        "pb_exists_after":     pb_exists_after,
+        "chown":               chown_result,
+        "restart_rc":          rs.returncode,
+        "restart_stderr":      rs.stderr.strip(),
+        "users_in_json":       [u["name"] for u in cfg.get("users", [])],
+    })
 
