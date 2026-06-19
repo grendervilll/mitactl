@@ -1103,11 +1103,13 @@ except: print('2100-2110')
   fi
 
   _PANEL_PORT="8080"
-  [[ -f "$PANEL_ENV" ]] && _PANEL_PORT=$(grep "^PANEL_PORT=" "$PANEL_ENV" | cut -d= -f2 || echo "8080")
+  if [[ -f "$PANEL_ENV" ]]; then
+    _PANEL_PORT=$(grep "^PANEL_PORT=" "$PANEL_ENV" 2>/dev/null | cut -d= -f2 || true)
+  fi
   _PANEL_PORT=${_PANEL_PORT:-8080}
 
   # Автодетект текущего SSH порта из sshd_config (чтобы не трогать его при чистке)
-  _SSH_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+  _SSH_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
   _SSH_PORT=${_SSH_PORT:-22}
   info "Обнаружен SSH порт: $_SSH_PORT (будет сохранён)"
   info "Порты mita для закрытия: $_MITA_RANGE"
@@ -1128,7 +1130,7 @@ except: print('2100-2110')
 
   # Сначала пробуем штатное удаление через dpkg/apt — пока unit-файл
   # ещё на месте, иначе pre/post-removal скрипты пакета падают
-  DEB_PKG=$(dpkg -l 2>/dev/null | grep -i "^ii.*mita" | awk '{print $2}' | head -1)
+  DEB_PKG=$(dpkg -l 2>/dev/null | grep -i "^ii.*mita" | awk '{print $2}' | head -1 || true)
   if [[ -n "$DEB_PKG" ]]; then
     apt-get remove -y -qq "$DEB_PKG" 2>/dev/null \
       || dpkg --remove --force-remove-reinstreq "$DEB_PKG" 2>/dev/null \
@@ -1162,7 +1164,7 @@ except: print('2100-2110')
   # ── 5. Удалить SSL-сертификаты Let's Encrypt (если выпускались) ─
   if command -v certbot &>/dev/null; then
     local domains
-    domains=$(certbot certificates 2>/dev/null | grep "Domains:" | awk '{print $2}')
+    domains=$(certbot certificates 2>/dev/null | grep "Domains:" | awk '{print $2}' || true)
     if [[ -n "$domains" ]]; then
       info "Найдены сертификаты Let's Encrypt: $domains"
       read -r -p "  Удалить их тоже? [y/N]: " del_certs
@@ -1207,7 +1209,7 @@ except: print('2100-2110')
     # Удаляем правило панели
     ufw delete allow "$_PANEL_PORT/tcp" 2>/dev/null || true
     # Дополнительно: чистим правила по комментарию (совместимость с разными версиями)
-    ufw status numbered 2>/dev/null | grep -iE "mita|panel" | awk -F'[][]' '{print $2}' | sort -rn | while read -r num; do
+    ufw status numbered 2>/dev/null | { grep -iE "mita|panel" || true; } | awk -F'[][]' '{print $2}' | sort -rn | while read -r num; do
       [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
     done
     ok "UFW: правила удалены"
