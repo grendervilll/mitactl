@@ -1,0 +1,750 @@
+{% extends "base.html" %}
+{% block title %}mita panel{% endblock %}
+{% block content %}
+
+<!-- DASHBOARD -->
+<div class="page active" id="page-dashboard">
+  <h1>Дашборд</h1>
+  <p class="subtitle">Обзор сервера в реальном времени</p>
+  <div class="grid-4" id="stat-cards">
+    <div class="stat-card"><div class="stat-label">IP сервера</div><div class="stat-value accent" style="font-size:1.1rem" id="s-server-ip">—</div></div>
+    <div class="stat-card">
+      <div class="stat-label">IP WARP</div>
+      <div class="stat-value ok" style="font-size:1.1rem" id="s-warp-ip">—</div>
+      <div id="s-warp-status" style="margin-top:6px"><span class="badge badge-off">—</span></div>
+    </div>
+    <div class="stat-card"><div class="stat-label">Трафик за неделю</div><div class="stat-value accent" id="s-week">—</div><div class="stat-sub">ГБ</div></div>
+    <div class="stat-card"><div class="stat-label">Трафик за месяц</div><div class="stat-value ok" id="s-month">—</div><div class="stat-sub">ГБ</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="stat-card">
+      <div class="stat-label">Порты mita</div>
+      <div class="stat-value" style="font-size:1.1rem" id="s-port">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Пользователей</div>
+      <div class="stat-value" id="s-users">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Статус mita</div>
+      <div id="s-mita-status" style="margin-top:6px"><span class="badge badge-off">—</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Быстрые действия</div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="loadDashboard()">⟳ Обновить</button>
+      <button class="btn btn-secondary" onclick="showPage('users',document.querySelectorAll('.nav-item')[1])">Управление пользователями</button>
+      <button class="btn btn-secondary" onclick="showPage('ssl',document.querySelectorAll('.nav-item')[2])">Настройка SSL</button>
+      <button class="btn btn-secondary" onclick="showClients()">📱 Клиенты mieru</button>
+    </div>
+  </div>
+
+  <!-- Clients modal trigger -->
+  <div id="clients-info" style="display:none"></div>
+</div>
+
+<!-- USERS -->
+<div class="page" id="page-users">
+  <div class="section-head">
+    <div><h1>Пользователи</h1><p class="subtitle">Создание и управление доступом</p></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Создать пользователей</div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:180px">
+        <label>Режим создания</label>
+        <select id="create-mode" onchange="toggleCreateMode()">
+          <option value="auto">Авто (случайные имена)</option>
+          <option value="manual">Вручную (свои имена)</option>
+          <option value="bulk-manual">Несколько вручную</option>
+        </select>
+      </div>
+      <div class="form-group" id="count-group" style="max-width:120px">
+        <label>Количество</label>
+        <input type="number" id="create-count" value="1" min="1" max="50">
+      </div>
+      <div class="form-group" id="single-name-group">
+        <label>Имя пользователя</label>
+        <input type="text" id="create-name" placeholder="например: vasya">
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="createUsers()">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+          Создать
+        </button>
+      </div>
+    </div>
+    <div id="bulk-names-group" style="display:none">
+      <label style="font-size:.8rem;color:var(--muted);display:block;margin-bottom:6px">Имена (по одному на строку)</label>
+      <textarea id="bulk-names" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);
+        color:var(--text);padding:10px;border-radius:var(--radius);font-family:var(--mono);font-size:.85rem;resize:vertical;outline:none"
+        placeholder="alice&#10;bob&#10;charlie"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Список пользователей</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Имя</th><th>WARP вкл</th><th>Правила WARP</th><th>Конфиг клиента</th><th>Действия</th></tr></thead>
+        <tbody id="users-tbody"><tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Загрузка...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- SSL -->
+<div class="page" id="page-ssl">
+  <h1>SSL-сертификаты</h1>
+  <p class="subtitle">Защита панели управления</p>
+
+  <div class="card" id="ssl-status-card">
+    <div class="card-title">Текущий сертификат</div>
+    <div id="ssl-current"><div style="color:var(--muted)">Загрузка...</div></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Самоподписной сертификат</div>
+      <p style="color:var(--muted);font-size:.875rem;margin-bottom:16px;line-height:1.6">
+        Генерируется мгновенно, действует <strong style="color:var(--text)">10 лет</strong>.
+        Браузер покажет предупреждение — его можно принять.
+        Подходит для личного использования.
+      </p>
+      <button class="btn btn-secondary" onclick="genSelfSigned()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        Создать самоподписной
+      </button>
+      <div id="selfsigned-result" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Let's Encrypt (бесплатный)</div>
+      <p style="color:var(--muted);font-size:.875rem;margin-bottom:16px;line-height:1.6">
+        Доверенный сертификат на <strong style="color:var(--text)">90 дней</strong>, продлевается автоматически.
+        Требует домен, указывающий на этот сервер, и открытый порт 80.
+      </p>
+      <div class="form-group" style="margin-bottom:10px">
+        <label>Домен</label>
+        <input type="text" id="le-domain" placeholder="panel.example.com">
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Email (необязательно)</label>
+        <input type="email" id="le-email" placeholder="admin@example.com">
+      </div>
+      <button class="btn btn-ok" onclick="getLetsEncrypt()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
+        Получить сертификат
+      </button>
+      <div id="le-result" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Применение сертификата</div>
+    <div class="alert alert-warn">
+      После смены сертификата необходимо перезапустить панель:<br>
+      <code style="font-family:var(--mono);font-size:.85rem">systemctl restart mita-panel</code>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+<!-- SECURITY / FAIL2BAN -->
+<div class="page" id="page-security">
+  <h1>Безопасность</h1>
+  <p class="subtitle">Защита панели и настройка fail2ban</p>
+  <div class="card" id="f2b-status-card">
+    <div class="card-title">Статус fail2ban</div>
+    <div id="f2b-status-body"><div style="color:var(--muted)">Загрузка...</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Настройка лимита попыток входа</div>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:18px;line-height:1.6">
+      Лимит работает на двух уровнях: встроенный счётчик панели (мгновенно) и fail2ban (блокировка на сетевом уровне).
+    </p>
+    <div style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:12px">Быстрые варианты</div>
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="applyPreset(3,1800)">Строгий &mdash; 3 / 30 min</button>
+        <button class="btn btn-secondary" onclick="applyPreset(5,3600)">Стандарт &mdash; 5 / 1 chas</button>
+        <button class="btn btn-secondary" onclick="applyPreset(10,900)">Мягкий &mdash; 10 / 15 min</button>
+        <button class="btn btn-secondary" onclick="applyPreset(3,86400)">Жёсткий &mdash; 3 / 24 ch</button>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="card-title" style="margin-bottom:12px">Ручная настройка</div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:200px">
+        <label>Попыток до блокировки</label>
+        <input type="number" id="f2b-maxretry" value="5" min="1" max="100">
+      </div>
+      <div class="form-group" style="max-width:220px">
+        <label>Время блокировки</label>
+        <select id="f2b-bantime" onchange="toggleCustomBantime()">
+          <option value="300">5 минут</option>
+          <option value="900">15 минут</option>
+          <option value="1800">30 минут</option>
+          <option value="3600" selected>1 chas</option>
+          <option value="7200">2 часа</option>
+          <option value="86400">24 часа</option>
+          <option value="604800">7 дней</option>
+          <option value="0">Указать вручную (сек)</option>
+        </select>
+      </div>
+      <div class="form-group" id="custom-bantime-group" style="display:none;max-width:160px">
+        <label>Секунды</label>
+        <input type="number" id="f2b-bantime-custom" value="3600" min="60">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <label class="toggle">
+        <input type="checkbox" id="f2b-install" checked>
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-size:.875rem;color:var(--muted)">Установить fail2ban если не установлен</span>
+    </div>
+    <button class="btn btn-primary" onclick="saveF2bConfig()">Применить</button>
+    <div id="f2b-result" style="margin-top:12px"></div>
+  </div>
+</div>
+
+
+
+{% block scripts %}
+<script>
+// ──────────────── DASHBOARD ────────────────
+async function loadDashboard(){
+  const d=await api('/api/dashboard');
+  if(!d)return;
+  document.getElementById('s-server-ip').textContent=d.server_ip||'?';
+  document.getElementById('s-warp-ip').textContent=d.warp_ip||'?';
+  const warpEl=document.getElementById('s-warp-status');
+  if(warpEl){
+    const warpOk=d.warp_ip&&d.warp_ip!=='недоступен'&&d.warp_ip!=='?';
+    warpEl.innerHTML=warpOk
+      ?'<span class="badge badge-ok">● Активен</span>'
+      :'<span class="badge" style="background:rgba(255,95,109,.15);color:var(--danger)">● Недоступен</span>';
+  }
+  document.getElementById('s-week').textContent=d.week_gb??'0';
+  document.getElementById('s-month').textContent=d.month_gb??'0';
+  document.getElementById('s-port').textContent=d.mita_port||'?';
+  document.getElementById('s-users').textContent=d.users_count??'0';
+  const el=document.getElementById('s-mita-status');
+  if(el) el.innerHTML=d.mita_running
+    ?'<span class="badge badge-ok">● Работает</span>'
+    :'<span class="badge" style="background:rgba(255,95,109,.15);color:var(--danger)">● Остановлен</span>';
+}
+loadDashboard();
+
+function showClients(){
+  const clients=[
+    {name:'mieru (официальный CLI)',url:'https://github.com/enfein/mieru',desc:'CLI-клиент для macOS, Linux, Windows, OpenWrt'},
+    {name:'Karing',url:'https://github.com/KaringX/karing',desc:'GUI клиент с поддержкой mieru, iOS/Android/Windows/macOS'},
+    {name:'NekoBox (NekoRay)',url:'https://github.com/MatsuriDayo/nekoray',desc:'GUI клиент для Windows/Linux, поддерживает mieru через sing-box'},
+    {name:'sing-box',url:'https://github.com/SagerNet/sing-box',desc:'Универсальное ядро, поддерживает mieru, все платформы'},
+    {name:'Hiddify',url:'https://github.com/hiddify/hiddify-app',desc:'Кросс-платформенный клиент на основе sing-box'},
+    {name:'FlClash',url:'https://github.com/chen08209/FlClash',desc:'Клиент на основе Clash, Android/Windows/Linux/macOS'},
+  ];
+  const html=`
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:16px">
+      mieru — собственный протокол. Поддерживается в следующих клиентах:
+    </p>
+    ${clients.map(c=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:12px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:600;margin-bottom:3px">${escH(c.name)}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${escH(c.desc)}</div>
+        </div>
+        <a href="${escH(c.url)}" target="_blank" rel="noopener"
+          class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:16px">
+          GitHub ↗
+        </a>
+      </div>`).join('')}
+    <p style="font-size:.75rem;color:var(--muted);margin-top:16px">
+      Для подключения используйте SOCKS5 127.0.0.1:1080 (mieru клиент) или встроенную поддержку протокола в Karing/sing-box.
+    </p>`;
+  openModal('Клиенты для mieru',html);
+}
+
+// ──────────────── USERS ────────────────
+let warpUsers=new Set();
+
+async function loadUsers(){
+  const [ud,wd]=await Promise.all([api('/api/users'),api('/api/users/warp_status')]);
+  if(!ud)return;
+  warpUsers=new Set(wd?.warp_users||[]);
+  const tbody=document.getElementById('users-tbody');
+  if(!ud.users.length){
+    tbody.innerHTML='<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Нет пользователей</td></tr>';
+    return;
+  }
+  tbody.innerHTML=ud.users.map(u=>{
+    const wOn=warpUsers.has(u.name);
+    return `<tr>
+      <td><strong>${escH(u.name)}</strong></td>
+      <td>
+        <label class="toggle" title="Весь WARP для этого пользователя">
+          <input type="checkbox" ${wOn?'checked':''} onchange="setWarp('${escH(u.name)}',this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="openWarpRules('${escH(u.name)}')" ${wOn?'':'style="opacity:.4;cursor:not-allowed" disabled'}>
+          ⚙ Настроить
+        </button>
+      </td>
+      <td><button class="btn btn-secondary btn-sm" onclick="showConfig('${escH(u.name)}')">Показать конфиг</button></td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteUser('${escH(u.name)}')">Удалить</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleCreateMode(){
+  const mode=document.getElementById('create-mode').value;
+  document.getElementById('count-group').style.display=mode==='manual'?'none':'';
+  document.getElementById('single-name-group').style.display=mode==='manual'?'':'none';
+  document.getElementById('bulk-names-group').style.display=mode==='bulk-manual'?'':'none';
+}
+toggleCreateMode();
+
+async function createUsers(){
+  const mode=document.getElementById('create-mode').value;
+  let body={};
+  if(mode==='auto'){
+    body={mode:'auto',count:parseInt(document.getElementById('create-count').value)||1};
+  }else if(mode==='manual'){
+    const n=document.getElementById('create-name').value.trim();
+    if(!n){showToast('Введите имя',true);return;}
+    body={mode:'manual',names:[n],count:1};
+  }else{
+    const lines=document.getElementById('bulk-names').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!lines.length){showToast('Введите имена',true);return;}
+    body={mode:'manual',names:lines,count:lines.length};
+  }
+  const d=await api('/api/users/create','POST',body);
+  if(!d||!d.created){showToast('Ошибка',true);return;}
+  showToast(`Создано: ${d.created.length}`);
+  showCreatedConfigs(d.created);
+  loadUsers();
+}
+
+function showCreatedConfigs(created){
+  if(!created.length)return;
+  let html='';
+  if(created.length===1){
+    const u=created[0];
+    html=`<p style="margin-bottom:12px;color:var(--muted);font-size:.875rem">
+      Пользователь <strong style="color:var(--text)">${escH(u.name)}</strong> создан.<br>
+      Пароль: <code style="font-family:var(--mono)">${escH(u.password)}</code></p>
+      ${codeBlock(u.client_config)}`;
+  }else{
+    html=`<p style="margin-bottom:16px;color:var(--muted);font-size:.875rem">Создано ${created.length} пользователей. Выберите нужного:</p>`+
+      created.map(u=>`
+        <div class="accordion-item">
+          <div class="accordion-header" onclick="toggleAccordion(this)">
+            <span>${escH(u.name)}</span>
+            <span class="accordion-arrow">&#x25BC;</span>
+          </div>
+          <div class="accordion-body">
+            <p style="font-size:.8rem;color:var(--muted);margin-bottom:8px">
+              Пароль: <code style="font-family:var(--mono)">${escH(u.password)}</code>
+            </p>
+            ${codeBlock(u.client_config)}
+          </div>
+        </div>`).join('');
+  }
+  openModal('Конфиги созданных пользователей', html);
+}
+
+async function showConfig(name){
+  const d=await api('/api/users/config?name='+encodeURIComponent(name));
+  if(!d||!d.ok){
+    openModal('Конфиг: '+name,'<div class="alert alert-err">'+(d?.error||'Ошибка загрузки')+'</div>');
+    return;
+  }
+  const enc=encodeURIComponent(name);
+  const dlMieru  =BASE+'/api/users/config/download?name='+enc+'&format=mieru';
+  const dlSingbox=BASE+'/api/users/config/download?name='+enc+'&format=singbox';
+
+  // Tab IDs
+  const tid='cfg_'+Math.random().toString(36).slice(2);
+
+  const html=`
+    <div style="margin-bottom:12px">
+      <span style="font-size:.85rem;color:var(--muted)">Пользователь: </span>
+      <strong>${escH(d.name)}</strong>
+      <span style="margin-left:12px;font-size:.85rem;color:var(--muted)">Пароль: </span>
+      <code style="font-family:var(--mono);font-size:.82rem;color:var(--ok)">${escH(d.password)}</code>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">
+      <button id="${tid}_tab_mieru"
+        onclick="switchConfigTab('${tid}','mieru')"
+        style="padding:8px 18px;font-size:.85rem;font-weight:600;border:none;background:none;
+          cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">
+        mieru JSON
+      </button>
+      <button id="${tid}_tab_singbox"
+        onclick="switchConfigTab('${tid}','singbox')"
+        style="padding:8px 18px;font-size:.85rem;font-weight:600;border:none;background:none;
+          cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">
+        sing-box / Karing
+      </button>
+    </div>
+
+    <!-- mieru tab -->
+    <div id="${tid}_pane_mieru">
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:8px">
+        Для официального клиента <strong style="color:var(--text)">mieru</strong> на macOS, Linux, Windows, OpenWrt.
+      </p>
+      ${codeBlock(d.client_config)}
+      <a href="${dlMieru}" download="${escH(d.name)}_mieru.json"
+        class="btn btn-secondary btn-sm" style="margin-top:8px">
+        ⬇ Скачать mieru.json
+      </a>
+    </div>
+
+    <!-- sing-box tab -->
+    <div id="${tid}_pane_singbox" style="display:none">
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:8px">
+        Для <strong style="color:var(--text)">Karing, Hiddify, NekoBox</strong> и других клиентов на базе sing-box.
+        Включает TUN-режим и правила для прямого выхода российских IP.
+      </p>
+      ${codeBlock(d.singbox_config)}
+      <a href="${dlSingbox}" download="${escH(d.name)}_singbox.json"
+        class="btn btn-ok btn-sm" style="margin-top:8px">
+        ⬇ Скачать singbox.json
+      </a>
+
+      <div class="divider"></div>
+
+      <div class="accordion-item">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span>📋 Если импорт файла не работает — добавить вручную в Karing</span>
+          <span class="accordion-arrow">▼</span>
+        </div>
+        <div class="accordion-body">
+          ${karingManualInstructions(d)}
+        </div>
+      </div>
+    </div>
+  `;
+  openModal('Конфиг: '+name, html);
+}
+
+function karingManualInstructions(d){
+  const ip   = d.client_config.profiles[0].servers[0].ipAddress;
+  const pb   = d.client_config.profiles[0].servers[0].portBindings[0];
+  const port = (pb.portRange||String(pb.port)).split('-')[0];
+  const user = escH(d.name);
+  const pass = escH(d.password);
+
+  const step = (n, html) => `
+    <div style="display:flex;gap:12px;margin-bottom:14px">
+      <div style="flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--surface2);
+        border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
+        font-size:.75rem;font-weight:700;color:var(--accent)">${n}</div>
+      <div style="font-size:.82rem;color:var(--text);line-height:1.6;padding-top:2px">${html}</div>
+    </div>`;
+
+  const field = (label, value) => `
+    <div style="margin-top:6px">
+      <span style="color:var(--muted)">${label}:</span>
+      <code style="font-family:var(--mono);color:var(--ok);background:var(--bg);
+        padding:2px 8px;border-radius:5px;margin-left:6px">${value}</code>
+      <button class="btn btn-secondary btn-sm" style="padding:2px 8px;margin-left:6px"
+        onclick="copyText('${value}')">копировать</button>
+    </div>`;
+
+  return `
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:16px">
+      Используйте если кнопка «Скачать singbox.json» → «Импорт» не подключается.
+      Karing требует ручного ввода полей mieru через интерфейс.
+    </p>
+    ${step(1, `Откройте Karing → <strong>добавить профиль</strong>`)}
+    ${step(2, `Выберите тип <strong>«Custom»</strong> и впишите любое имя профиля`)}
+    ${step(3, `Перейдите в раздел <strong>«My profiles»</strong>`)}
+    ${step(4, `Нажмите <strong>«+»</strong> в поле только что созданного профиля`)}
+    ${step(5, `В выпадающем списке протоколов выберите <strong>«Mieru»</strong>`)}
+    ${step(6, `В поле <strong>«tag»</strong> впишите любое название (например <code>proxy</code>)`)}
+    ${step(7, `Заполните адрес сервера и порт:
+        ${field('server',      ip)}
+        ${field('server port', port)}`)}
+    ${step(8, `Заполните учётные данные:
+        ${field('username', user)}
+        ${field('password', pass)}`)}
+    ${step(9, `В поле <strong>«multiplexing»</strong> выберите <strong>«multiplexing_low»</strong>`)}
+    ${step(10, `В поле <strong>«transport»</strong> впишите заглавными буквами <code style="font-family:var(--mono);color:var(--ok)">TCP</code>,
+        затем нажмите ✓ в правом верхнем углу.<br>
+        Убедитесь что в «My profiles» тумблер профиля зелёный, затем нажмите кнопку подключения в главном меню Karing.`)}
+    <div class="divider"></div>
+    ${step(11, `<strong>Diversion Rules (разделение трафика)</strong> — чтобы направить конкретные сайты/приложения мимо VPN или, наоборот, через него:
+        <ol style="margin-top:8px;padding-left:18px;color:var(--muted)">
+          <li>Нажмите карандаш (✏) в правом верхнем углу раздела «Diversion Rules»</li>
+          <li>Нажмите «⋮» (три точки) там же → <strong>«+ Add»</strong></li>
+          <li>Введите название правила, прокрутите список вниз и выберите созданное правило</li>
+          <li>Добавьте нужные адреса/приложения, нажмите ✓ в правом верхнем углу</li>
+          <li>Вернитесь в «Diversion Rules», найдите своё правило внизу списка</li>
+          <li>Нажмите на него и выберите <strong>«Direct»</strong> (трафик идёт мимо VPN)
+              или раскройте имя своего профиля и выберите имя VPN-конфига (трафик идёт через VPN)</li>
+        </ol>`)}
+  `;
+}
+
+function switchConfigTab(tid, tab) {
+  ['mieru','singbox'].forEach(t => {
+    const isActive = t === tab;
+    const btn  = document.getElementById(tid+'_tab_'+t);
+    const pane = document.getElementById(tid+'_pane_'+t);
+    if (!btn || !pane) return;
+    btn.style.borderBottomColor = isActive ? 'var(--accent)' : 'transparent';
+    btn.style.color             = isActive ? 'var(--accent)' : 'var(--muted)';
+    pane.style.display          = isActive ? '' : 'none';
+  });
+}
+
+async function deleteUser(name){
+  if(!confirm(`Удалить пользователя "${name}"?`))return;
+  await api('/api/users/delete','POST',{name});
+  showToast(`${name} удалён`);
+  loadUsers();
+}
+
+async function setWarp(name,enabled){
+  await api('/api/users/warp','POST',{name,enabled});
+  showToast(`WARP для ${name}: ${enabled?'включён':'выключен'}`);
+  loadUsers();
+}
+
+async function openWarpRules(name){
+  // Загрузить текущие правила
+  const d=await api('/api/users/warp_rules?name='+encodeURIComponent(name));
+  const r=d?.rules||{domains:[],ips:[],sources:[]};
+
+  const html=`
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:18px;line-height:1.6">
+      Трафик этого пользователя через <strong style="color:var(--accent)">WARP</strong> только для указанных доменов, IP и источников.<br>
+      Всё остальное идёт напрямую с IP вашего сервера.
+    </p>
+
+    <div style="margin-bottom:16px">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:block;margin-bottom:8px">
+        Домены (по одному на строку)
+      </label>
+      <textarea id="wr-domains" rows="5" style="width:100%;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:.82rem;
+        resize:vertical;outline:none;line-height:1.6" placeholder="openai.com&#10;chatgpt.com&#10;anthropic.com">${escH(r.domains.join('\n'))}</textarea>
+      <p style="font-size:.75rem;color:var(--muted);margin-top:4px">Субдомены включаются автоматически</p>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:block;margin-bottom:8px">
+        IP-диапазоны / CIDR (по одному на строку)
+      </label>
+      <textarea id="wr-ips" rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:.82rem;
+        resize:vertical;outline:none;line-height:1.6" placeholder="104.16.0.0/12&#10;172.64.0.0/13">${escH(r.ips.join('\n'))}</textarea>
+    </div>
+
+    <div style="margin-bottom:20px">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:block;margin-bottom:8px">
+        Источники — geosite / geoip / URL (по одному на строку)
+      </label>
+      <textarea id="wr-sources" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);
+        color:var(--text);padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:.82rem;
+        resize:vertical;outline:none;line-height:1.6"
+        placeholder="geosite:openai&#10;geosite:netflix&#10;geoip:us&#10;https://example.com/domains.txt">${escH(r.sources.join('\n'))}</textarea>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:6px;line-height:1.7">
+        <strong style="color:var(--text)">geosite:категория</strong> — из базы v2fly (openai, google, netflix, category-ru…)<br>
+        <strong style="color:var(--text)">geoip:страна</strong> — IP-диапазоны страны (us, gb, de…)<br>
+        <strong style="color:var(--text)">https://…</strong> — прямая ссылка на текстовый файл с доменами или CIDR
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-primary" onclick="saveWarpRules('${escH(name)}')">
+        Сохранить и применить
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+    </div>
+    <div id="wr-result" style="margin-top:12px"></div>
+  `;
+  openModal('WARP-правила: '+name, html);
+}
+
+async function saveWarpRules(name){
+  const btn=document.querySelector('#modal-body .btn-primary');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span> Применяю…';
+
+  const domains=document.getElementById('wr-domains').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const ips=document.getElementById('wr-ips').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const sources=document.getElementById('wr-sources').value.split('\n').map(s=>s.trim()).filter(Boolean);
+
+  const d=await api('/api/users/warp_rules','POST',{name,domains,ips,sources});
+  btn.disabled=false;
+  btn.textContent='Сохранить и применить';
+
+  const el=document.getElementById('wr-result');
+  if(d?.ok){
+    el.innerHTML='<div class="alert alert-ok">✓ Правила сохранены и применены в mita</div>';
+    showToast('Правила WARP обновлены');
+  }else{
+    el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
+  }
+}
+
+// ──────────────── SSL ────────────────
+async function loadSSL(){
+  const d=await api('/api/ssl/status');
+  if(!d)return;
+  const el=document.getElementById('ssl-current');
+  if(d.type==='none'){
+    el.innerHTML='<div class="alert alert-warn">Сертификат не настроен. Панель работает по HTTP.</div>';
+  }else{
+    const icon=d.type==='letsencrypt'?'🔒':'🔑';
+    const label=d.type==='letsencrypt'?"Let's Encrypt":'Самоподписной';
+    el.innerHTML=`
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div style="font-size:2rem">${icon}</div>
+        <div>
+          <div style="font-weight:700;margin-bottom:4px">${label}</div>
+          ${d.domain?`<div style="color:var(--muted);font-size:.85rem">Домен: <span style="color:var(--accent)">${escH(d.domain)}</span></div>`:''}
+          <div style="color:var(--muted);font-size:.85rem">Файл: <code style="font-family:var(--mono)">${escH(d.cert)}</code></div>
+          <div style="color:var(--muted);font-size:.85rem;margin-top:4px">${escH(d.expires)}</div>
+        </div>
+      </div>`;
+  }
+}
+
+async function genSelfSigned(){
+  const btn=event.target;
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Генерация...';
+  const el=document.getElementById('selfsigned-result');
+  const d=await api('/api/ssl/selfsigned','POST');
+  btn.disabled=false;btn.textContent='Создать самоподписной';
+  if(!d)return;
+  if(d.ok){
+    el.innerHTML=`<div class="alert alert-ok">✓ Сертификат создан (10 лет)<br><small>${escH(d.expires||'')}</small><br><small style="opacity:.7">${escH(d.note||'')}</small></div>`;
+    loadSSL();
+  }else{
+    el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(d.error||'')}</div>`;
+  }
+}
+
+async function getLetsEncrypt(){
+  const domain=document.getElementById('le-domain').value.trim();
+  const email=document.getElementById('le-email').value.trim();
+  if(!domain){showToast('Укажите домен',true);return;}
+  const btn=event.target;
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Получение (может занять минуту)...';
+  const el=document.getElementById('le-result');
+  const d=await api('/api/ssl/letsencrypt','POST',{domain,email});
+  btn.disabled=false;btn.textContent="Получить сертификат";
+  if(!d)return;
+  if(d.ok){
+    el.innerHTML=`<div class="alert alert-ok">✓ Сертификат получен!<br><small>${escH(d.expires||'')}</small><br><small style="opacity:.7">${escH(d.note||'')}</small></div>`;
+    loadSSL();
+  }else{
+    el.innerHTML=`<div class="alert alert-err">Ошибка:<br><pre style="white-space:pre-wrap;font-size:.78rem;margin-top:6px">${escH(d.error||'')}</pre></div>`;
+  }
+}
+
+// ──────────────── SECURITY / FAIL2BAN ────────────────
+async function loadSecurityPage() {
+  const d = await api('/api/fail2ban/status');
+  if (!d) return;
+  const el = document.getElementById('f2b-status-body');
+  const instBadge = d.installed
+    ? '<span class="badge badge-ok">Установлен</span>'
+    : '<span class="badge badge-off">Не установлен</span>';
+  const activeBadge = d.active
+    ? '<span class="badge badge-ok">Активен</span>'
+    : '<span class="badge badge-warn">Остановлен</span>';
+  const jailBadge = d.jail_active
+    ? '<span class="badge badge-ok">Jail активен</span>'
+    : '<span class="badge badge-off">Jail не настроен</span>';
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${instBadge} ${d.installed ? activeBadge : ''} ${d.active ? jailBadge : ''}
+    </div>
+    <div style="font-size:.85rem;color:var(--muted)">
+      Текущие лимиты:
+      <strong style="color:var(--text)">${d.max_retry} попыток</strong> /
+      <strong style="color:var(--text)">${fmtSeconds(d.ban_time)}</strong>
+    </div>`;
+  // Sync inputs
+  document.getElementById('f2b-maxretry').value = d.max_retry;
+  const sel = document.getElementById('f2b-bantime');
+  const opts = [...sel.options].map(o => o.value);
+  if (opts.includes(String(d.ban_time))) {
+    sel.value = d.ban_time;
+  } else {
+    sel.value = '0';
+    document.getElementById('f2b-bantime-custom').value = d.ban_time;
+    document.getElementById('custom-bantime-group').style.display = '';
+  }
+}
+
+function fmtSeconds(s) {
+  if (s >= 86400) return Math.round(s/86400) + ' дн.';
+  if (s >= 3600)  return Math.round(s/3600)  + ' ч.';
+  if (s >= 60)    return Math.round(s/60)    + ' мин.';
+  return s + ' сек.';
+}
+
+document.getElementById('f2b-bantime').addEventListener('change', function() {
+  document.getElementById('custom-bantime-group').style.display =
+    this.value === '0' ? '' : 'none';
+});
+
+function applyPreset(maxRetry, banTime) {
+  document.getElementById('f2b-maxretry').value = maxRetry;
+  const sel = document.getElementById('f2b-bantime');
+  const opts = [...sel.options].map(o => o.value);
+  if (opts.includes(String(banTime))) {
+    sel.value = banTime;
+    document.getElementById('custom-bantime-group').style.display = 'none';
+  } else {
+    sel.value = '0';
+    document.getElementById('f2b-bantime-custom').value = banTime;
+    document.getElementById('custom-bantime-group').style.display = '';
+  }
+  saveF2bConfig();
+}
+
+async function saveF2bConfig() {
+  const maxRetry = parseInt(document.getElementById('f2b-maxretry').value) || 5;
+  const selVal   = document.getElementById('f2b-bantime').value;
+  const banTime  = selVal === '0'
+    ? parseInt(document.getElementById('f2b-bantime-custom').value) || 3600
+    : parseInt(selVal);
+  const install  = document.getElementById('f2b-install').checked;
+  const btn      = document.querySelector('#page-security .btn-primary');
+  const el       = document.getElementById('f2b-result');
+  btn.disabled   = true;
+  btn.innerHTML  = '<span class="spinner"></span> Применяю…';
+  const d = await api('/api/fail2ban/configure', 'POST', {max_retry: maxRetry, ban_time: banTime, install});
+  btn.disabled = false;
+  btn.textContent = 'Применить';
+  if (d?.ok) {
+    el.innerHTML = `<div class="alert alert-ok">✓ ${escH(d.message||'Применено')}</div>`;
+    loadSecurityPage();
+  } else {
+    el.innerHTML = `<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
+  }
+}
+
+function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function codeBlock(json){
+  const txt=JSON.stringify(json,null,2);
+  const id='cb'+Math.random().toString(36).slice(2);
+  return `<div class="code-block" id="${id}">${escH(txt)}</div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById('${id}').textContent).then(()=>showToast('Скопировано ✓'))">Копировать</button>`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mita panel — вход</title>
+<style>
+:root{--bg:#0d0f14;--surface:#141720;--border:#252a3a;--accent:#4f8fff;--accent2:#7b5fff;
+  --ok:#3ecf8e;--danger:#ff5f6d;--text:#e2e8f4;--muted:#6b7594;--sans:'Inter',system-ui,sans-serif;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;
+  display:flex;align-items:center;justify-content:center}
+.wrap{width:100%;max-width:380px;padding:20px}
+.logo{text-align:center;margin-bottom:32px}
+.logo-badge{display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;font-size:.85rem;font-weight:700;padding:6px 14px;border-radius:8px;letter-spacing:.5px;margin-bottom:12px}
+.logo h1{font-size:1.4rem;font-weight:700;letter-spacing:-.3px}
+.logo p{color:var(--muted);font-size:.85rem;margin-top:4px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
+.form-group{margin-bottom:16px}
+label{display:block;font-size:.8rem;font-weight:500;color:var(--muted);margin-bottom:6px}
+input{width:100%;background:#1c2030;border:1px solid var(--border);color:var(--text);
+  padding:10px 14px;border-radius:var(--radius);font-size:.9rem;outline:none;transition:.15s;font-family:var(--sans)}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,143,255,.15)}
+.btn{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;
+  border-radius:var(--radius);font-size:.9rem;font-weight:600;cursor:pointer;transition:.15s;font-family:var(--sans)}
+.btn:hover{background:#3d7aff}.btn:disabled{opacity:.6;cursor:not-allowed}
+.err{color:var(--danger);font-size:.83rem;margin-top:12px;text-align:center;display:none}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="logo-badge">MITA</div>
+    <h1>Панель управления</h1>
+    <p>Войдите, чтобы продолжить</p>
+  </div>
+  <div class="card">
+    <div class="form-group">
+      <label>Логин</label>
+      <input type="text" id="u" autocomplete="username" placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label>Пароль</label>
+      <input type="password" id="p" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <button class="btn" id="loginBtn" onclick="doLogin()">Войти</button>
+    <div class="err" id="err"></div>
+    <div id="attempts-wrap" style="display:none;margin-top:10px;text-align:center">
+      <span style="font-size:.8rem;color:var(--muted)">Осталось попыток: </span>
+      <span id="attempts-left" style="font-size:.8rem;font-weight:700;color:var(--warn)">—</span>
+    </div>
+  </div>
+</div>
+<script>
+const BASE="{{ base }}";
+document.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+async function doLogin(){
+  const btn=document.getElementById('loginBtn');
+  const err=document.getElementById('err');
+  const attWrap=document.getElementById('attempts-wrap');
+  const attLeft=document.getElementById('attempts-left');
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Вхожу...';err.style.display='none';
+  try{
+    const r=await fetch(BASE+'/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:document.getElementById('u').value,password:document.getElementById('p').value})});
+    const d=await r.json();
+    if(d.ok){
+      location.href=BASE+'/';
+      return;
+    }
+    err.textContent=d.error||'Ошибка';
+    err.style.display='block';
+    if(d.rate_limited){
+      attWrap.style.display='block';
+      attLeft.textContent='0';
+      btn.disabled=true;
+      btn.textContent='Заблокировано';
+      return;
+    }
+    if(typeof d.remaining==='number'){
+      attWrap.style.display='block';
+      attLeft.textContent=d.remaining;
+      attLeft.style.color=d.remaining<=1?'var(--danger)':'var(--warn)';
+    }
+  }catch(e){err.textContent='Ошибка соединения';err.style.display='block';}
+  btn.disabled=false;btn.textContent='Войти';
+}
+</script>
+</body>
+</html>
