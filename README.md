@@ -5,10 +5,10 @@ Web-panel and cli-utils for mita server
 Tested and works perfectly on Ubuntu 24.04. Operation on other distributions is not guaranteed.
 Протестировано и отлично работает на Ubuntu 24.04. Работа на других дистрибутивах не гарантирована. 
 
-# The panel is currently in testing; some features require further work and revision.
-# Панель пока в стадии тестирования, есть функции, которые нужно доделывать/переделывать.
+### The panel is currently in testing; some features require further work and revision./Панель пока в стадии тестирования, есть функции, которые нужно доделывать/переделывать.
 
-# Установка/Installation
+
+### Установка/Installation
 1) Run `git clone` of this repository onto your VPS server./Сделайте `git clone` этого репозитория на свой VPS сервер
 2) Change into the created folder./Перейдите в созданную папку
 3) Execute the following commands/Выполните следующие команды:
