@@ -120,7 +120,7 @@ fi
 # =============================================================================
 section "Установка зависимостей"
 
-apt-get update -qq
+apt-get update -qq || { warn "apt-get update завершился с ошибкой, продолжаем..."; true; }
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   curl wget jq cron \
   ca-certificates gnupg lsb-release \
@@ -128,7 +128,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   fail2ban openssl \
   net-tools \
   python3 python3-yaml \
-  2>/dev/null
+  || error "Ошибка установки зависимостей. Запустите вручную: apt-get install -y curl wget jq cron iptables ufw fail2ban python3 python3-yaml"
 ok "Базовые пакеты установлены (включая fail2ban, ufw, ipset, iptables-persistent, python3-yaml)"
 
 # =============================================================================
