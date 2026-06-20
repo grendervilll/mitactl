@@ -332,16 +332,30 @@ print(b.get('portRange',b.get('port','2100-2110')))
 
 _fw_open() {
   local port="$1" proto="${2:-tcp}"
-  command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
-    && ufw allow "$port/$proto" 2>/dev/null || true
-  iptables -I INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+  if [[ "$port" == *"-"* ]]; then
+    local _s="${port%-*}" _e="${port#*-}"
+    command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
+      && ufw allow "${_s}:${_e}/${proto}" 2>/dev/null || true
+    iptables -I INPUT -p "$proto" --dport "${_s}:${_e}" -j ACCEPT 2>/dev/null || true
+  else
+    command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
+      && ufw allow "${port}/${proto}" 2>/dev/null || true
+    iptables -I INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+  fi
 }
 
 _fw_close() {
   local port="$1" proto="${2:-tcp}"
-  command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
-    && ufw delete allow "$port/$proto" 2>/dev/null || true
-  iptables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+  if [[ "$port" == *"-"* ]]; then
+    local _s="${port%-*}" _e="${port#*-}"
+    command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
+      && ufw delete allow "${_s}:${_e}/${proto}" 2>/dev/null || true
+    iptables -D INPUT -p "$proto" --dport "${_s}:${_e}" -j ACCEPT 2>/dev/null || true
+  else
+    command -v ufw &>/dev/null && ufw status | grep -q "Status: active" \
+      && ufw delete allow "${port}/${proto}" 2>/dev/null || true
+    iptables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════════════

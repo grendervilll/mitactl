@@ -2,7 +2,7 @@
 """
 mita Web Panel — Flask backend
 """
-import os, json, subprocess, secrets, string, random, ipaddress, socket, time, logging
+import os, json, re, subprocess, secrets, string, random, ipaddress, socket, time, logging
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -174,10 +174,11 @@ def get_warp_ip():
         return "недоступен"
 
 def get_traffic_stats():
-    """Возвращает трафик по всем пользователям за 7 и 30 дней."""
+    """Возвращает трафик и статус активности по всем пользователям."""
     raw = mita_cmd("get", "users")
     week_total = month_total = 0.0
     users_stats = []
+    today = datetime.now().date()
 
     # mita get users output format (v3.x):
     # USER           LAST ACTIVE  1 DAY DOWN  1 DAY UP  30 DAYS DOWN  30 DAYS UP
@@ -191,19 +192,42 @@ def get_traffic_stats():
         data_lines.append(line)
 
     for line in data_lines:
-        # Split on 2+ spaces to handle names with spaces
-        import re as _re
-        parts = _re.split(r"\s{2,}", line.strip())
+        parts = re.split(r"\s{2,}", line.strip())
         if len(parts) < 3:
-            # Try single-space split as fallback
             parts = line.split()
         if len(parts) < 3:
             continue
         try:
             name = parts[0]
-            # Find traffic columns — they contain units like MiB, GiB, B, KiB
-            traffic_parts = [p for p in parts[1:] if any(u in p for u in ["B","iB","KiB","MiB","GiB","TiB"])]
+
+            # Parse LAST ACTIVE field (parts[1])
+            last_active_raw = parts[1].strip() if len(parts) > 1 else ""
+            online = False
+            last_active_display = "никогда"
+            if last_active_raw and last_active_raw.lower() not in ("never", "-", "n/a", "никогда"):
+                try:
+                    la_date = datetime.strptime(last_active_raw[:10], "%Y-%m-%d").date()
+                    delta = (today - la_date).days
+                    if delta == 0:
+                        online = True
+                        last_active_display = "сегодня"
+                    elif delta == 1:
+                        last_active_display = "вчера"
+                    elif delta < 7:
+                        last_active_display = f"{delta} дн. назад"
+                    elif delta < 30:
+                        last_active_display = f"{delta // 7} нед. назад"
+                    else:
+                        last_active_display = f"{delta} дн. назад"
+                except Exception:
+                    last_active_display = last_active_raw
+
+            # Find traffic columns — contain units like MiB, GiB, KiB, B
+            traffic_parts = [p for p in parts[1:] if any(u in p for u in ["TiB","GiB","MiB","KiB","iB","B"])]
+            d1_down = d1_up = d30_down = d30_up = 0.0
             if len(traffic_parts) >= 4:
+                d1_down  = _parse_traffic(traffic_parts[0])
+                d1_up    = _parse_traffic(traffic_parts[1])
                 d30_down = _parse_traffic(traffic_parts[2])
                 d30_up   = _parse_traffic(traffic_parts[3])
             elif len(traffic_parts) >= 2:
@@ -211,12 +235,17 @@ def get_traffic_stats():
                 d30_up   = _parse_traffic(traffic_parts[1])
             else:
                 continue
-            d7_approx = (d30_down + d30_up) / 30 * 7
+
+            d7_bytes = (d30_down + d30_up) / 30 * 7
             month_total += d30_down + d30_up
-            week_total  += d7_approx
+            week_total  += d7_bytes
             users_stats.append({
-                "name": name,
-                "month_mb": round((d30_down + d30_up) / 1024 / 1024, 1),
+                "name":         name,
+                "online":       online,
+                "last_active":  last_active_display,
+                "day_mb":       round((d1_down + d1_up) / 1024 / 1024, 2),
+                "week_mb":      round(d7_bytes / 1024 / 1024, 2),
+                "month_mb":     round((d30_down + d30_up) / 1024 / 1024, 2),
             })
         except Exception:
             continue
@@ -450,6 +479,16 @@ def _mita_running():
         return r.stdout.strip() == "active"
     except Exception:
         return False
+
+# ── API: users stats (traffic + online status) ────────────────────────────────
+@app.route(f"{BASE}/api/users/stats")
+@login_required
+def api_users_stats():
+    try:
+        stats = get_traffic_stats()
+        return jsonify({"users": stats["users"]})
+    except Exception as e:
+        return jsonify({"users": [], "error": str(e)})
 
 # ── API: users ────────────────────────────────────────────────────────────────
 @app.route(f"{BASE}/api/users", methods=["GET"])
