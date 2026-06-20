@@ -830,6 +830,15 @@ else:
   command -v mita &>/dev/null && echo -e "  mita:   $(mita version 2>/dev/null || echo '?')"
   command -v docker &>/dev/null && echo -e "  docker: $(docker --version 2>/dev/null | cut -d, -f1)"
 
+  # ── Расположение файлов ───────────────────────────────────
+  echo ""
+  echo -e "${CYAN}── Расположение файлов ─────────────────────────────────${NC}"
+  echo -e "  Конфиг mita:        ${YELLOW}${MITA_CONFIG}${NC}"
+  echo -e "  Конфиг панели:      ${YELLOW}${PANEL_CONFIG}${NC}"
+  echo -e "  Переменные панели:  ${YELLOW}${PANEL_ENV}${NC}"
+  echo -e "  Директория панели:  ${YELLOW}/opt/mita-panel${NC}"
+  echo -e "  Утилита mita-ctl:   ${YELLOW}/usr/local/bin/mita-ctl${NC}"
+
   pause
 }
 
