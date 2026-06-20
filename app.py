@@ -940,7 +940,7 @@ def api_fail2ban_configure():
 
     # Write fail2ban filter for mita-panel
     filter_content = """[Definition]
-failregex = ^.*"POST /[^"]+/login[^"]*" 4(01|29).*$
+failregex = ^<HOST> .+ "POST /[^"]+/login[^"]*" 4(?:01|29).*$
 ignoreregex =
 """
     jail_content = f"""[mita-panel]
@@ -951,14 +951,17 @@ logpath  = /var/log/mita-panel-access.log
 maxretry = {max_retry}
 bantime  = {ban_time}
 findtime = {ban_time}
-action   = iptables-multiport[name=mita-panel, port="http,https,8080,8443", protocol=tcp]
 """
     try:
         Path("/etc/fail2ban/filter.d/mita-panel.conf").write_text(filter_content)
         Path("/etc/fail2ban/jail.d/mita-panel.conf").write_text(jail_content)
         subprocess.run(["systemctl","enable","fail2ban","--now"], capture_output=True)
-        subprocess.run(["fail2ban-client","reload"], capture_output=True)
-        ok_msg = "Настройки сохранены и применены"
+        r_reload = subprocess.run(["systemctl","restart","fail2ban"], capture_output=True)
+        r_active = subprocess.run(["systemctl","is-active","fail2ban"], capture_output=True, text=True)
+        if r_active.stdout.strip() == "active":
+            ok_msg = "Настройки сохранены и применены"
+        else:
+            ok_msg = "Настройки сохранены, но fail2ban не запустился — проверьте journalctl -u fail2ban"
     except Exception as e:
         ok_msg = f"Настройки сохранены (fail2ban: {e})"
 

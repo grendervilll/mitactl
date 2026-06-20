@@ -1030,7 +1030,7 @@ with open('$PANEL_CONFIG','w') as f: json.dump(d,f,indent=2)
     mkdir -p /etc/fail2ban/filter.d /etc/fail2ban/jail.d
     cat > /etc/fail2ban/filter.d/mita-panel.conf << EOF
 [Definition]
-failregex = ^.*"POST /[^"]+/login[^"]*" 4(01|29).*$
+failregex = ^<HOST> .+ "POST /[^"]+/login[^"]*" 4(?:01|29).*$
 ignoreregex =
 EOF
     cat > /etc/fail2ban/jail.d/mita-panel.conf << EOF
@@ -1042,10 +1042,12 @@ logpath  = /var/log/mita-panel-access.log
 maxretry = $max_retry
 bantime  = $ban_time
 findtime = $ban_time
-action   = iptables-multiport[name=mita-panel, port="http,https,8080,8443", protocol=tcp]
 EOF
-    systemctl restart fail2ban 2>/dev/null || true
-    ok "fail2ban настроен: $max_retry попыток / ${ban_time}с"
+    if systemctl restart fail2ban 2>/dev/null && systemctl is-active --quiet fail2ban; then
+      ok "fail2ban настроен и запущен: $max_retry попыток / ${ban_time}с"
+    else
+      warn "fail2ban настроен, но не запустился. Проверьте: journalctl -u fail2ban -n 20"
+    fi
   else
     warn "fail2ban не установлен — лимиты сохранены только в panel.json"
   fi
@@ -1202,10 +1204,16 @@ except: print('2100-2110')
 
   # ── 8. Закрыть порты в firewall ────────────────────────────────
   info "Закрытие портов mita ($_MITA_RANGE) и панели ($_PANEL_PORT) в firewall..."
-  info "SSH порт $_SSH_PORT остаётся открытым."
+  info "SSH порт $_SSH_PORT будет явно сохранён открытым."
+
+  _UFW_ACTIVE=false
+  command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active" && _UFW_ACTIVE=true
 
   # ---- UFW ----
-  if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+  if $_UFW_ACTIVE; then
+    # Сначала явно гарантируем SSH, ПОТОМ удаляем остальные правила
+    ufw allow "$_SSH_PORT/tcp" comment "SSH" 2>/dev/null || true
+
     # Удаляем правило mita (диапазон или одиночный порт)
     if [[ "$_MITA_RANGE" == *"-"* ]]; then
       _SP="${_MITA_RANGE%-*}"; _EP="${_MITA_RANGE#*-}"
@@ -1218,14 +1226,14 @@ except: print('2100-2110')
     # Удаляем правило панели
     ufw delete allow "$_PANEL_PORT/tcp" 2>/dev/null || true
     # Дополнительно: чистим правила по комментарию (совместимость с разными версиями)
-    ufw status numbered 2>/dev/null | { grep -iE "mita|panel" || true; } | awk -F'[][]' '{print $2}' | sort -rn | while read -r num; do
+    ufw status numbered 2>/dev/null | { grep -iE "mita|panel" || true; } | awk -F'[][]' '{gsub(/[[:space:]]/, "", $2); print $2}' | sort -rn | while read -r num; do
       [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
     done
-    ok "UFW: правила удалены"
+    ok "UFW: правила удалены, SSH ($_SSH_PORT) сохранён"
   fi
 
-  # ---- iptables ----
-  if command -v iptables &>/dev/null; then
+  # ---- iptables (только когда UFW не управляет firewall) ----
+  if ! $_UFW_ACTIVE && command -v iptables &>/dev/null; then
     if [[ "$_MITA_RANGE" == *"-"* ]]; then
       _SP="${_MITA_RANGE%-*}"; _EP="${_MITA_RANGE#*-}"
       iptables -D INPUT -p tcp --dport "${_SP}:${_EP}" -j ACCEPT 2>/dev/null || true
@@ -1235,12 +1243,15 @@ except: print('2100-2110')
       iptables -D INPUT -p udp --dport "$_MITA_RANGE" -j ACCEPT 2>/dev/null || true
     fi
     iptables -D INPUT -p tcp --dport "$_PANEL_PORT" -j ACCEPT 2>/dev/null || true
-    # Сохраняем правила если есть iptables-save
+    # Явно обеспечиваем SSH-правило первым в цепочке
+    iptables -D INPUT -p tcp --dport "$_SSH_PORT" -j ACCEPT 2>/dev/null || true
+    iptables -I INPUT 1 -p tcp --dport "$_SSH_PORT" -j ACCEPT 2>/dev/null || true
+    # Сохраняем правила
     command -v iptables-save &>/dev/null && iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-    ok "iptables: правила удалены"
+    ok "iptables: правила удалены, SSH ($_SSH_PORT) сохранён"
   fi
 
-  ok "Firewall: порты mita и панели закрыты. SSH ($_SSH_PORT) не тронут."
+  ok "Firewall: порты mita и панели закрыты. SSH ($_SSH_PORT) открыт."
 
   systemctl daemon-reload 2>/dev/null || true
 
