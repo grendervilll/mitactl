@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ========================= ЦВЕТА ДЛЯ ВЫВОДА =========================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 ok()      { echo -e "${GREEN}[OK]${NC}   $*"; }
@@ -782,10 +782,10 @@ else
     echo -e "     В ответ вы получите ${BOLD}токен${NC} — длинную строку вида:"
     echo -e "     ${YELLOW}1234567890:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw${NC}"
     echo ""
-    echo -e "  ${BOLD}2.${NC} Найдите ${GREEN}@userinfobot${NC} и нажмите /start"
-    echo -e "     Он покажет ваш ${BOLD}Telegram ID${NC} — число (например 123456789)"
+    echo -e "  ${BOLD}2.${NC} Откройте своего бота в Telegram и отправьте любое сообщение"
+    echo -e "     (например «привет»). ID определится автоматически."
     echo ""
-    echo -e "  ${BOLD}3.${NC} Когда токен и ID готовы — нажмите Enter для продолжения"
+    echo -e "  ${BOLD}3.${NC} Когда токен готов — нажмите Enter для продолжения"
 
     while true; do
       echo ""
@@ -797,15 +797,39 @@ else
       break
     done
 
-    while true; do
-      echo ""
-      read -r -p "  Впишите ваш Telegram ID (число): " BOT_ADMIN
-      if [[ -z "$BOT_ADMIN" || ! "$BOT_ADMIN" =~ ^[0-9]+$ ]]; then
-        warn "Telegram ID должен быть числом (узнайте у @userinfobot)"
-        continue
-      fi
-      break
+    echo ""
+    info "Определение вашего Telegram ID..."
+    echo -e "  Отправьте ${YELLOW}любое сообщение${NC} своему боту в Telegram прямо сейчас."
+    echo -e "  Ожидание сообщения (макс. 60 сек)..."
+
+    BOT_ADMIN=""
+    for i in $(seq 1 30); do
+      BOT_ADMIN=$(curl -s --max-time 5 "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" 2>/dev/null | \
+        python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    ids=[r['message']['from']['id'] for r in d.get('result',[]) if 'message' in r and 'from' in r['message']]
+    print(ids[-1] if ids else '')
+except: pass
+" 2>/dev/null)
+      [[ -n "$BOT_ADMIN" ]] && break
+      sleep 2
     done
+
+    if [[ -z "$BOT_ADMIN" || ! "$BOT_ADMIN" =~ ^[0-9]+$ ]]; then
+      warn "Не удалось определить ID автоматически."
+      while true; do
+        echo ""
+        read -r -p "  Впишите ваш Telegram ID вручную (число): " BOT_ADMIN
+        if [[ -n "$BOT_ADMIN" && "$BOT_ADMIN" =~ ^[0-9]+$ ]]; then
+          break
+        fi
+        warn "Telegram ID должен быть числом"
+      done
+    else
+      ok "Telegram ID определён: ${GREEN}${BOT_ADMIN}${NC}"
+    fi
 
     echo ""
     info "Запуск установки Telegram-бота..."

@@ -1151,7 +1151,7 @@ _bot_install() {
   section "Установка Telegram-бота"
 
   local installer=""
-  for candidate in /opt/mita-panel/install-bot.sh "$SCRIPT_DIR/install-bot.sh"; do
+  for candidate in /opt/mita-panel/install-bot.sh; do
     [[ -f "$candidate" ]] && { installer="$candidate"; break; }
   done
 
@@ -1164,7 +1164,32 @@ _bot_install() {
   read -r -p "Токен бота (от @BotFather): " token
   [[ -z "$token" ]] && { error "Токен обязателен"; return; }
 
-  read -r -p "Ваш Telegram ID (число, @userinfobot): " admin_id
+  echo ""
+  info "Определение вашего Telegram ID..."
+  echo -e "  Отправьте ${YELLOW}любое сообщение${NC} своему боту в Telegram прямо сейчас."
+  echo -e "  Ожидание сообщения (макс. 60 сек)..."
+
+  admin_id=""
+  for i in $(seq 1 30); do
+    admin_id=$(curl -s --max-time 5 "https://api.telegram.org/bot${token}/getUpdates" 2>/dev/null | \
+      python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    ids=[r['message']['from']['id'] for r in d.get('result',[]) if 'message' in r and 'from' in r['message']]
+    print(ids[-1] if ids else '')
+except: pass
+" 2>/dev/null)
+    [[ -n "$admin_id" ]] && break
+    sleep 2
+  done
+
+  if [[ -z "$admin_id" || ! "$admin_id" =~ ^[0-9]+$ ]]; then
+    warn "Не удалось определить ID автоматически."
+    read -r -p "Впишите ваш Telegram ID вручную (число): " admin_id
+  else
+    ok "Telegram ID определён: ${GREEN}${admin_id}${NC}"
+  fi
   [[ -z "$admin_id" || ! "$admin_id" =~ ^[0-9]+$ ]] && { error "ID должен быть числом"; return; }
 
   BOT_TOKEN_NONINTERACTIVE="$token" BOT_ADMIN_NONINTERACTIVE="$admin_id" bash "$installer"

@@ -84,6 +84,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/app.py" "$PANEL_DIR/"
 cp -r "$SCRIPT_DIR/templates" "$PANEL_DIR/"
 [[ -d "$SCRIPT_DIR/static" ]] && cp -r "$SCRIPT_DIR/static" "$PANEL_DIR/"
+# Копируем установщик бота рядом — чтобы работала установка через веб-панель и mita-ctl
+[[ -f "$SCRIPT_DIR/install-bot.sh" ]] && cp "$SCRIPT_DIR/install-bot.sh" "$PANEL_DIR/"
+[[ -f "$SCRIPT_DIR/bot.py" ]] && cp "$SCRIPT_DIR/bot.py" "$PANEL_DIR/"
 ok "Файлы скопированы в $PANEL_DIR"
 
 # ── генерация секретов ─────────────────────────────────────────────

@@ -52,9 +52,8 @@
       <div class="stat-card">
         <div class="stat-label">Аптайм</div>
         <div class="stat-value" style="font-size:1.1rem" id="s-uptime">—</div>
-      </div>
-    </div>
   </div>
+</div>
 
   <div class="card">
     <div class="card-title">Быстрые действия</div>
@@ -144,17 +143,19 @@
 
   <div class="grid-2">
     <div class="card">
-      <div class="card-title">Самоподписной сертификат</div>
+      <div class="card-title">SSH-туннель</div>
       <p style="color:var(--muted);font-size:.875rem;margin-bottom:16px;line-height:1.6">
-        Генерируется мгновенно, действует <strong style="color:var(--text)">10 лет</strong>.
-        Браузер покажет предупреждение — его можно принять.
-        Подходит для личного использования.
+        Панель будет слушать только <strong style="color:var(--text)">127.0.0.1</strong> — недоступна снаружи.
+        Подключение через зашифрованный SSH-туннель с вашего компьютера.
       </p>
-      <button class="btn btn-secondary" onclick="genSelfSigned()">
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-        Создать самоподписной
+      <div id="ssh-tunnel-info" style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.7">
+        Загрузка...
+      </div>
+      <button class="btn btn-warn" onclick="switchToSSHTunnel()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
+        Переключить на SSH-туннель
       </button>
-      <div id="selfsigned-result" style="margin-top:12px"></div>
+      <div id="ssh-result" style="margin-top:12px"></div>
     </div>
     <div class="card">
       <div class="card-title">Let's Encrypt (бесплатный)</div>
@@ -264,17 +265,21 @@
   <div class="card" id="bot-install-card" style="display:none">
     <div class="card-title">Установка бота</div>
     <p style="color:var(--muted);font-size:.875rem;margin-bottom:18px;line-height:1.6">
-      Создайте бота через <strong style="color:var(--accent)">@BotFather</strong> в Telegram,
-      скопируйте токен и узнайте ваш Telegram ID через <strong style="color:var(--accent)">@userinfobot</strong>.
+      Создайте бота через <strong style="color:var(--accent)">@BotFather</strong> в Telegram и скопируйте токен.
+      Затем нажмите «Определить ID» и отправьте любое сообщение своему боту.
     </p>
     <div class="form-row">
       <div class="form-group">
         <label>Токен бота (от @BotFather)</label>
         <input type="text" id="bot-token" placeholder="123456:ABC-DEF1234gh...">
       </div>
-      <div class="form-group" style="max-width:200px">
+      <div class="form-group" style="max-width:240px">
         <label>Ваш Telegram ID</label>
-        <input type="text" id="bot-admin-id" placeholder="123456789">
+        <div style="display:flex;gap:8px">
+          <input type="text" id="bot-admin-id" placeholder="123456789" style="flex:1">
+          <button class="btn btn-ok btn-sm" onclick="detectBotAdminId()" style="white-space:nowrap">🔍 Определить ID</button>
+        </div>
+        <div id="bot-detect-status" style="font-size:.75rem;color:var(--muted);margin-top:4px"></div>
       </div>
     </div>
     <button class="btn btn-primary" onclick="installBot()">
@@ -856,20 +861,43 @@ async function loadSSL(){
         </div>
       </div>`;
   }
+  loadPanelAccess();
 }
 
-async function genSelfSigned(){
-  const btn=event.target;
-  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Генерация...';
-  const el=document.getElementById('selfsigned-result');
-  const d=await api('/api/ssl/selfsigned','POST');
-  btn.disabled=false;btn.textContent='Создать самоподписной';
-  if(!d)return;
-  if(d.ok){
-    el.innerHTML=`<div class="alert alert-ok">✓ Сертификат создан (10 лет)<br><small>${escH(d.expires||'')}</small><br><small style="opacity:.7">${escH(d.note||'')}</small></div>`;
-    loadSSL();
-  }else{
-    el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(d.error||'')}</div>`;
+async function loadPanelAccess() {
+  const d = await api('/api/panel/access');
+  if (!d) return;
+  const el = document.getElementById('ssh-tunnel-info');
+  if (!el) return;
+  const icon = d.mode === 'ssh' ? '🔒' : '🌐';
+  const label = d.mode === 'ssh' ? 'SSH-туннель (только 127.0.0.1)' : 'Доступ по IP (0.0.0.0)';
+  const sshCmd = `ssh -L ${d.panel_port}:127.0.0.1:${d.panel_port} -p ${d.ssh_port} root@${d.server_ip} -N`;
+  el.innerHTML = `
+    <div style="margin-bottom:8px">${icon} <strong>${label}</strong></div>
+    <div>Сервер: <code style="color:var(--accent)">${escH(d.server_ip)}</code></div>
+    <div>Порт: <code style="color:var(--accent)">${d.panel_port}</code></div>
+    <div style="margin-top:8px;font-size:.8rem;color:var(--ok)">Команда для туннеля:</div>
+    <div class="code-block" id="ssh-cmd-block">${escH(sshCmd)}</div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="copyText(document.getElementById('ssh-cmd-block').textContent)">Копировать</button>`;
+}
+
+async function switchToSSHTunnel() {
+  const btn = document.querySelector('#page-ssl .btn-warn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Переключение...';
+
+  const el = document.getElementById('ssh-result');
+  const d = await api('/api/panel/access', 'POST', {mode: 'ssh'});
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg> Переключить на SSH-туннель';
+
+  if (d?.ok) {
+    el.innerHTML = '<div class="alert alert-ok">✓ Панель переключена на SSH-туннель. Используйте команду ниже для подключения.</div>';
+    showToast('SSH-туннель активирован');
+    loadPanelAccess();
+  } else {
+    el.innerHTML = `<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
   }
 }
 
@@ -940,6 +968,35 @@ async function loadBotPage() {
     installEl.style.display = '';
     manageEl.style.display = 'none';
   }
+}
+
+async function detectBotAdminId() {
+  const token = document.getElementById('bot-token').value.trim();
+  if (!token) { showToast('Введите токен бота', true); return; }
+
+  const el = document.getElementById('bot-detect-status');
+  const btn = document.querySelector('#bot-install-card .btn-ok');
+
+  el.textContent = 'Отправьте любое сообщение боту в Telegram. Ожидание (60 сек)...';
+  el.style.color = 'var(--warn)';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ожидание...'; }
+
+  try {
+    const d = await api('/api/bot/detect-id', 'POST', {token});
+    if (d?.ok) {
+      document.getElementById('bot-admin-id').value = d.admin_id;
+      el.textContent = '✓ ID определён: ' + d.admin_id;
+      el.style.color = 'var(--ok)';
+      showToast('Telegram ID определён');
+    } else {
+      el.textContent = '⚠ ' + (d?.error || 'Не удалось');
+      el.style.color = 'var(--danger)';
+    }
+  } catch(e) {
+    el.textContent = '⚠ Ошибка: ' + e.message;
+    el.style.color = 'var(--danger)';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '🔍 Определить ID'; }
 }
 
 async function installBot() {

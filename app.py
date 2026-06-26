@@ -677,6 +677,99 @@ def api_panel_restart():
         return jsonify({"ok": False, "error": r.stderr.strip()}), 500
     return jsonify({"ok": True})
 
+@app.route(f"{BASE}/api/panel/access")
+@login_required
+def api_panel_access_get():
+    pc = load_panel_config()
+    panel_port = os.environ.get("PANEL_PORT", "8080")
+    secret = os.environ.get("SECRET_PATH", "")
+    mode = pc.get("access_mode", "ip")
+    ssh_port = pc.get("ssh_port", 22)
+    return jsonify({
+        "mode":       mode,
+        "panel_port": panel_port,
+        "secret":     secret,
+        "ssh_port":   ssh_port,
+        "server_ip":  get_server_ip(),
+    })
+
+@app.route(f"{BASE}/api/panel/access", methods=["POST"])
+@login_required
+def api_panel_access_set():
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "").strip()
+
+    if mode not in ("ip", "ssh"):
+        return jsonify({"ok": False, "error": "mode должен быть ip или ssh"}), 400
+
+    pc = load_panel_config()
+    panel_port = os.environ.get("PANEL_PORT", "8080")
+    secret = os.environ.get("SECRET_PATH", "")
+
+    if mode == "ssh":
+        bind = "127.0.0.1"
+        # Закрыть порт в firewall
+        _fw_close_port(panel_port)
+    else:
+        bind = "0.0.0.0"
+        _fw_open_port(panel_port)
+
+    # Обновить start.sh с новым bind
+    start_sh = "/opt/mita-panel/start.sh"
+    try:
+        Path(start_sh).write_text(f"""#!/bin/bash
+set -a; source /etc/mita/panel.env; set +a
+SSL_ARGS=""
+if [[ -n "$SSL_CERT" && -n "$SSL_KEY" && -f "$SSL_CERT" && -f "$SSL_KEY" ]]; then
+  SSL_ARGS="--certfile=$SSL_CERT --keyfile=$SSL_KEY"
+fi
+exec /opt/mita-panel/venv/bin/gunicorn \\
+    --bind {bind}:$PANEL_PORT \\
+    --workers 2 --timeout 120 \\
+    --access-logfile /var/log/mita-panel-access.log \\
+    --error-logfile /var/log/mita-panel.log \\
+    $SSL_ARGS app:app
+""")
+    except Exception:
+        pass
+
+    # Сохранить режим в panel.json
+    pc["access_mode"] = mode
+    Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
+
+    subprocess.run(["systemctl","restart","mita-panel"], capture_output=True, timeout=10)
+
+    ssh_port = pc.get("ssh_port", 22)
+    return jsonify({
+        "ok":         True,
+        "mode":       mode,
+        "panel_port": panel_port,
+        "secret":     secret,
+        "server_ip":  get_server_ip(),
+        "ssh_port":   ssh_port,
+    })
+
+def _fw_close_port(port):
+    try:
+        if subprocess.run(["which","ufw"], capture_output=True).returncode == 0:
+            subprocess.run(["ufw","delete","allow",f"{port}/tcp"], capture_output=True)
+        elif subprocess.run(["which","iptables"], capture_output=True).returncode == 0:
+            subprocess.run(["iptables","-D","INPUT","-p","tcp","--dport",str(port),"-j","ACCEPT"], capture_output=True)
+    except Exception:
+        pass
+
+def _fw_open_port(port):
+    try:
+        if subprocess.run(["which","ufw"], capture_output=True).returncode == 0 \
+           and subprocess.run(["ufw","status"], capture_output=True, text=True).stdout.find("active") != -1:
+            subprocess.run(["ufw","allow",f"{port}/tcp","comment","mita-panel"], capture_output=True)
+        elif subprocess.run(["which","iptables"], capture_output=True).returncode == 0:
+            r = subprocess.run(["iptables","-C","INPUT","-p","tcp","--dport",str(port),"-j","ACCEPT"], capture_output=True)
+            if r.returncode != 0:
+                subprocess.run(["iptables","-I","INPUT","1","-p","tcp","--dport",str(port),"-j","ACCEPT"], capture_output=True)
+    except Exception:
+        pass
+
 def _update_env(key, value):
     env_file = "/etc/mita/panel.env"
     lines = []
@@ -1131,6 +1224,43 @@ def api_bot_config():
         "token":     cfg.get("token",""),
         "admin_ids": cfg.get("admin_ids", []),
     })
+
+@app.route(f"{BASE}/api/bot/detect-id", methods=["POST"])
+@login_required
+def api_bot_detect_id():
+    data  = request.get_json(silent=True) or {}
+    token = data.get("token","").strip()
+    if not token:
+        return jsonify({"ok": False, "error": "Токен обязателен"}), 400
+
+    import urllib.request
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    # Очищаем pending updates перед опросом
+    try:
+        req = urllib.request.Request(url + "?offset=-1", headers={"User-Agent": "mita-panel"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass
+
+    admin_id = ""
+    for _ in range(20):
+        time.sleep(3)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "mita-panel"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data_raw = json.loads(resp.read())
+            ids = [r["message"]["from"]["id"]
+                   for r in data_raw.get("result", [])
+                   if "message" in r and "from" in r["message"]]
+            if ids:
+                admin_id = str(ids[-1])
+                break
+        except Exception:
+            continue
+
+    if admin_id:
+        return jsonify({"ok": True, "admin_id": admin_id})
+    return jsonify({"ok": False, "error": "Не получено ни одного сообщения. Отправьте любое сообщение боту и попробуйте снова."}), 404
 
 # ── API: скачать конфиг как файл ─────────────────────────────────────────────
 @app.route(f"{BASE}/api/users/config/download")
