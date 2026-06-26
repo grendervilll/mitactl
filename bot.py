@@ -116,7 +116,7 @@ MAIN_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("➕ Создать", callback_data="create"),
      InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
     [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu"),
-     InlineKeyboardButton("📊 Статистика", callback_data="stats")],
+     InlineKeyboardButton("🛡 Безопасность", callback_data="security")],
     [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
 ])
 
@@ -188,6 +188,7 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
     lines = ["👥 *Пользователи*\n"]
+    user_buttons = []
     for u in users:
         name = u["name"]
         s = stats_map.get(name, {})
@@ -198,15 +199,21 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
         ename = escape_md(name)
         lines.append(f"{o} {ename} {w}  день: {day}  нед: {wk}  мес: {mon}")
+        user_buttons.append([
+            InlineKeyboardButton(f"📋 {name}", callback_data=f"config_{name}"),
+            InlineKeyboardButton(f"📱 Karing", callback_data=f"karing_{name}"),
+        ])
+
+    user_buttons.extend([
+        [InlineKeyboardButton("➕ Создать", callback_data="create"),
+         InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
+        [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
+        [InlineKeyboardButton("« Назад", callback_data="main")],
+    ])
 
     await query.edit_message_text(
         "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Создать", callback_data="create"),
-             InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
-            [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
-            [InlineKeyboardButton("« Назад", callback_data="main")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(user_buttons),
         parse_mode="MarkdownV2"
     )
 
@@ -333,26 +340,199 @@ async def toggle_warp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="MarkdownV2"
     )
 
-# ── stats ─────────────────────────────────────────────────────────────────────
+def _build_client_config(name, password):
+    cfg = load_mita_config()
+    bindings = cfg.get("portBindings", [{}])[0]
+    proto = bindings.get("protocol", "TCP")
+    port_range = bindings.get("portRange", str(bindings.get("port", "?")))
+    ip = get_server_ip()
+    return {
+        "profiles": [{"profileName": "default",
+                       "user": {"name": name, "password": password},
+                       "servers": [{"ipAddress": ip,
+                                    "portBindings": [{"portRange": port_range,
+                                                      "protocol": proto}]}]}],
+        "activeProfile": "default",
+        "rpcPort": 8964,
+        "socks5Port": 1080,
+    }
+
+# ── config / Karing ──────────────────────────────────────────────────────────
 @admin_only
-async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    cpu = psutil.cpu_percent(interval=0.5)
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
-    boot = datetime.fromtimestamp(psutil.boot_time()).strftime("%d.%m.%Y %H:%M")
+    name = query.data[len("config_"):]
+    cfg = load_mita_config()
+    user = next((u for u in cfg.get("users", []) if u["name"] == name), None)
+    if not user:
+        await query.answer("Пользователь не найден")
+        return
+
+    data = json.dumps(_build_client_config(name, user["password"]), indent=2, ensure_ascii=False)
+    await query.edit_message_text(
+        f"📋 Конфиг `{escape_md(name)}`:\n```json\n{data[:3500]}\n```",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("« К пользователям", callback_data="users")],
+            [InlineKeyboardButton("📱 Karing", callback_data=f"karing_{name}")],
+            [InlineKeyboardButton("« На главную", callback_data="main")],
+        ]),
+        parse_mode="MarkdownV2"
+    )
+
+@admin_only
+async def show_karing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    name = query.data[len("karing_"):]
+    cfg = load_mita_config()
+    user = next((u for u in cfg.get("users", []) if u["name"] == name), None)
+    if not user:
+        await query.answer("Пользователь не найден")
+        return
+
+    data = _build_client_config(name, user["password"])
+    ip = data["profiles"][0]["servers"][0]["ipAddress"]
+    pb = data["profiles"][0]["servers"][0]["portBindings"][0]
+    port = (pb["portRange"] or str(pb.get("port", "?"))).split("-")[0]
+
+    text = (
+        f"📱 *Ручная настройка Karing* для `{escape_md(name)}`\n\n"
+        f"Поля для ввода в Karing:\n\n"
+        f"server:\n```\n{ip}\n```\n"
+        f"server port:\n```\n{port}\n```\n"
+        f"username:\n```\n{name}\n```\n"
+        f"password:\n```\n{user['password']}\n```\n"
+        f"transport:\n```\nTCP\n```\n"
+        f"multiplexing: *multiplexing\\_low*"
+    )
 
     await query.edit_message_text(
-        f"📊 *Сервер*\n\n"
-        f"CPU: `{cpu:.1f}%`\n"
-        f"RAM: `{mem.percent:.1f}%` \\({fmt_bytes(mem.used)} / {fmt_bytes(mem.total)}\\)\n"
-        f"Диск: `{disk.percent:.1f}%` \\({fmt_bytes(disk.used)} / {fmt_bytes(disk.total)}\\)\n"
-        f"Аптайм: с `{boot}`\n"
-        f"mita: {'🟢 работает' if _mita_running() else '🔴 остановлен'}",
+        text,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Обновить", callback_data="stats")],
+            [InlineKeyboardButton("📋 JSON-конфиг", callback_data=f"config_{name}")],
+            [InlineKeyboardButton("« К пользователям", callback_data="users")],
+            [InlineKeyboardButton("« На главную", callback_data="main")],
+        ]),
+        parse_mode="MarkdownV2"
+    )
+
+# ── security ─────────────────────────────────────────────────────────────────
+@admin_only
+async def show_security(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    installed = subprocess.run(["which","fail2ban-client"], capture_output=True).returncode == 0
+    active = jail_active = False
+    if installed:
+        r = subprocess.run(["systemctl","is-active","fail2ban"], capture_output=True, text=True)
+        active = r.stdout.strip() == "active"
+        if active:
+            r2 = subprocess.run(["fail2ban-client","status","mita-panel"], capture_output=True, text=True)
+            jail_active = r2.returncode == 0
+
+    pc = load_panel_config()
+    max_retry = pc.get("login_max_attempts", 5)
+    ban_time  = pc.get("login_ban_seconds", 3600)
+
+    def fmt_sec(s):
+        if s >= 86400: return f"{s//86400} дн"
+        if s >= 3600:  return f"{s//3600} ч"
+        if s >= 60:    return f"{s//60} мин"
+        return f"{s} сек"
+
+    text = (
+        "🛡 *Безопасность*\n\n"
+        f"fail2ban: {'✅ установлен' if installed else '❌ не установлен'}\n"
+        f"Статус: {'🟢 активен' if active else '🔴 остановлен'}\n"
+        f"Jail mita\\-panel: {'🟢 активен' if jail_active else '⚪ не настроен'}\n\n"
+        f"Лимиты входа:\n"
+        f"• попыток: *{max_retry}*\n"
+        f"• бан: *{fmt_sec(ban_time)}*\n"
+        f"• встроенный лимит: {'✅' if pc.get('login_max_attempts') else '⚪'}\n\n"
+        "*Применить пресет:*"
+    )
+
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Строгий 3/30m", callback_data="f2b_3_1800"),
+             InlineKeyboardButton("Стандарт 5/1h", callback_data="f2b_5_3600")],
+            [InlineKeyboardButton("Мягкий 10/15m", callback_data="f2b_10_900"),
+             InlineKeyboardButton("Жёсткий 3/24h", callback_data="f2b_3_86400")],
+            [InlineKeyboardButton("Установить fail2ban", callback_data="f2b_install")],
             [InlineKeyboardButton("« Назад", callback_data="main")],
+        ]),
+        parse_mode="MarkdownV2"
+    )
+
+@admin_only
+async def apply_f2b_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    if len(parts) >= 3 and parts[1] == "install":
+        r = subprocess.run(["apt-get","install","-y","-qq","fail2ban"], capture_output=True, text=True)
+        if r.returncode != 0:
+            await query.edit_message_text(
+                f"❌ Ошибка установки fail2ban: {r.stderr.strip()[:500]}",
+                reply_markup=back_button(),
+                parse_mode="MarkdownV2"
+            )
+            return
+        await query.edit_message_text(
+            "✅ fail2ban установлен. Настройте лимиты через пресеты.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("« К безопасности", callback_data="security")],
+            ]),
+            parse_mode="MarkdownV2"
+        )
+        return
+
+    if len(parts) < 4:
+        return
+    max_retry = int(parts[2])
+    ban_time  = int(parts[3])
+
+    pc = load_panel_config()
+    pc["login_max_attempts"] = max_retry
+    pc["login_ban_seconds"]  = ban_time
+    Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
+
+    filter_content = f"""[Definition]
+failregex = ^<HOST> .+ "POST /[^"]+/login[^"]*" 4(?:01|29).*$
+ignoreregex =
+"""
+    jail_content = f"""[mita-panel]
+enabled  = true
+filter   = mita-panel
+backend  = auto
+logpath  = /var/log/mita-panel-access.log
+maxretry = {max_retry}
+bantime  = {ban_time}
+findtime = {ban_time}
+"""
+    try:
+        Path("/etc/fail2ban/filter.d/mita-panel.conf").write_text(filter_content)
+        Path("/etc/fail2ban/jail.d/mita-panel.conf").write_text(jail_content)
+        subprocess.run(["systemctl","enable","fail2ban","--now"], capture_output=True)
+        subprocess.run(["systemctl","restart","fail2ban"], capture_output=True)
+    except Exception:
+        pass
+
+    def fmt_sec(s):
+        if s >= 86400: return f"{s//86400} дн"
+        if s >= 3600:  return f"{s//3600} ч"
+        if s >= 60:    return f"{s//60} мин"
+        return f"{s} сек"
+
+    await query.edit_message_text(
+        f"🛡 *Пресет применён*\n\n"
+        f"Попыток: *{max_retry}*\nБан: *{fmt_sec(ban_time)}*",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("« К безопасности", callback_data="security")],
+            [InlineKeyboardButton("« На главную", callback_data="main")],
         ]),
         parse_mode="MarkdownV2"
     )
@@ -423,11 +603,11 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         "📋 *Команды*\n\n"
         "Используйте кнопки меню:\n"
-        "👥 Пользователи — список с трафиком\n"
+        "👥 Пользователи — список с трафиком, конфиг, Karing\n"
         "➕ Создать — создать пользователя\n"
         "🗑 Удалить — выбрать и удалить\n"
         "🔄 WARP — включить/выключить\n"
-        "📊 Статистика — CPU, RAM, диск\n"
+        "🛡 Безопасность — fail2ban, лимиты\n"
         "📊 Дашборд — полный обзор",
         reply_markup=back_button(),
         parse_mode="MarkdownV2"
@@ -453,8 +633,14 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await warp_menu(update, context)
     elif data.startswith("warp_"):
         return await toggle_warp(update, context)
-    elif data == "stats":
-        return await show_stats(update, context)
+    elif data == "security":
+        return await show_security(update, context)
+    elif data.startswith("config_"):
+        return await show_config(update, context)
+    elif data.startswith("karing_"):
+        return await show_karing(update, context)
+    elif data.startswith("f2b_"):
+        return await apply_f2b_preset(update, context)
     elif data == "dashboard":
         return await show_dashboard(update, context)
     elif data == "help":
