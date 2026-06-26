@@ -671,10 +671,12 @@ def api_ssl_letsencrypt():
 @app.route(f"{BASE}/api/panel/restart", methods=["POST"])
 @login_required
 def api_panel_restart():
-    r = subprocess.run(["systemctl","restart","mita-panel"],
-                       capture_output=True, text=True, timeout=10)
-    if r.returncode != 0:
-        return jsonify({"ok": False, "error": r.stderr.strip()}), 500
+    # Отложенный перезапуск — gunicorn убивает текущий процесc при restart,
+    # не давая ответу уйти. sleep 1 даёт Flask отдать ответ до перезапуска.
+    subprocess.Popen(
+        ["bash","-c","sleep 1 && systemctl restart mita-panel"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     return jsonify({"ok": True})
 
 @app.route(f"{BASE}/api/panel/access")
@@ -737,7 +739,10 @@ exec /opt/mita-panel/venv/bin/gunicorn \\
     pc["access_mode"] = mode
     Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
 
-    subprocess.run(["systemctl","restart","mita-panel"], capture_output=True, timeout=10)
+    subprocess.Popen(
+        ["bash","-c","sleep 1 && systemctl restart mita-panel"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
     ssh_port = pc.get("ssh_port", 22)
     return jsonify({
