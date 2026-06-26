@@ -68,19 +68,13 @@ section "Установка зависимостей"
 apt-get update -qq
 apt-get install -y -qq python3 python3-pip python3-venv
 
-if python3 -c "import psutil" 2>/dev/null; then
-    ok "psutil уже установлен"
-else
-    info "Установка psutil..."
-    pip3 install psutil
+BOT_VENV="$BOT_DIR/venv"
+if [[ ! -d "$BOT_VENV" ]]; then
+    python3 -m venv "$BOT_VENV"
 fi
 
-if python3 -c "from telegram.ext import Application" 2>/dev/null; then
-    ok "python-telegram-bot уже установлен"
-else
-    info "Установка python-telegram-bot..."
-    pip3 install python-telegram-bot
-fi
+"$BOT_VENV/bin/pip" install -q python-telegram-bot psutil 2>/dev/null
+ok "Python-зависимости установлены в виртуальное окружение"
 
 # ── копирование файлов ──────────────────────────────────────────────
 section "Установка бота"
@@ -128,7 +122,7 @@ After=network.target
 Type=simple
 WorkingDirectory=$BOT_DIR
 EnvironmentFile=$BOT_DIR/env
-ExecStart=/usr/bin/python3 $BOT_DIR/bot.py
+ExecStart=$BOT_VENV/bin/python3 $BOT_DIR/bot.py
 Restart=always
 RestartSec=10
 User=root
