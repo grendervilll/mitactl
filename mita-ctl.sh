@@ -28,6 +28,16 @@ load_panel() {
 panel_value() { load_panel | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$1',''))" 2>/dev/null || echo ""; }
 env_value()   { [[ -f "$PANEL_ENV" ]] && grep "^$1=" "$PANEL_ENV" | cut -d= -f2- || echo ""; }
 
+_panel_proto() {
+  local ssl_cert
+  ssl_cert=$(env_value "SSL_CERT")
+  if [[ -n "$ssl_cert" && -f "$ssl_cert" ]]; then
+    echo "https"
+  else
+    echo "http"
+  fi
+}
+
 gen_pass() { openssl rand -base64 48 | tr -d '/+=' | head -c 32; }
 
 # ── SSH tunnel helper ──────────────────────────────────────────────────────
@@ -47,7 +57,7 @@ print_ssh_instruction() {
   echo -e "  ${YELLOW}ssh -L ${port}:127.0.0.1:${port} -p ${ssh_port} root@${server_ip} -N${NC}"
   echo ""
   echo -e "  Затем откройте в браузере:"
-  echo -e "  ${BOLD}${GREEN}http://127.0.0.1:${port}/${secret}/${NC}"
+  echo -e "  ${BOLD}${GREEN}$(_panel_proto)://127.0.0.1:${port}/${secret}/${NC}"
   echo ""
   echo -e "  ${BLUE}Флаг -N означает что SSH не выполняет команды, только туннель.${NC}"
   echo -e "  ${BLUE}Для фонового режима добавьте -f:${NC}"
@@ -76,6 +86,7 @@ main_menu() {
     echo -e "  ${BOLD}8.${NC}  Рекомендации по безопасности VPS"
     echo -e "  ${RED}${BOLD}9.${NC}  ${RED}Полное удаление mita, панели и WARP${NC}"
     echo -e "  ${BOLD}10.${NC} Показать текущую конфигурацию"
+    echo -e "  ${BOLD}11.${NC} Управление Telegram-ботом"
     echo -e "  ${BOLD}0.${NC}  Выход"
     echo ""
     read -r -p "  Выберите пункт: " choice
@@ -90,6 +101,7 @@ main_menu() {
       8) menu_security ;;
       9) menu_uninstall ;;
       10) menu_show_config ;;
+      11) menu_bot ;;
       0) exit 0 ;;
       *) warn "Неверный выбор" ;;
     esac
@@ -160,7 +172,7 @@ with open('$PANEL_CONFIG','w') as f: json.dump(d,f,indent=2)
       systemctl restart mita-panel 2>/dev/null || true
       ok "Панель доступна по IP"
       echo ""
-      echo -e "  Адрес: ${BOLD}${GREEN}http://${server_ip}:${panel_port}/${secret}/${NC}"
+      echo -e "  Адрес: ${BOLD}${GREEN}$(_panel_proto)://${server_ip}:${panel_port}/${secret}/${NC}"
       pause
       ;;
 
@@ -1072,6 +1084,141 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# 11. TELEGRAM БОТ
+# ════════════════════════════════════════════════════════════════════════════
+menu_bot() {
+  section "Управление Telegram-ботом"
+
+  BOT_SERVICE="mita-bot"
+  BOT_DIR="/opt/mita-bot"
+  BOT_CONFIG="/etc/mita/bot.json"
+
+  local installed=false running=false
+  if [[ -f "/etc/systemd/system/${BOT_SERVICE}.service" ]]; then
+    installed=true
+    systemctl is-active --quiet "$BOT_SERVICE" && running=true
+  fi
+
+  echo ""
+  if $installed; then
+    echo -e "  Статус:    ${GREEN}● Установлен${NC}"
+    if $running; then
+      echo -e "  Состояние: ${GREEN}● Активен${NC}"
+    else
+      echo -e "  Состояние: ${RED}● Остановлен${NC}"
+    fi
+    if [[ -f "$BOT_CONFIG" ]]; then
+      local token
+      token=$(python3 -c "import json; d=json.load(open('$BOT_CONFIG')); print(d.get('token','')[:8]+'…')" 2>/dev/null || echo "—")
+      echo -e "  Токен:     ${YELLOW}${token}${NC}"
+      local admins
+      admins=$(python3 -c "import json; d=json.load(open('$BOT_CONFIG')); print(', '.join(d.get('admin_ids',[])))" 2>/dev/null || echo "—")
+      echo -e "  Админы ID: ${YELLOW}${admins}${NC}"
+    fi
+  else
+    echo -e "  Статус:    ${YELLOW}● Не установлен${NC}"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}1.${NC}  Установить / обновить бота"
+  echo -e "  ${BOLD}2.${NC}  Перезапустить бота"
+  echo -e "  ${BOLD}3.${NC}  Добавить админа (Telegram ID)"
+  echo -e "  ${BOLD}4.${NC}  Логи бота (journalctl)"
+  if $installed; then
+    echo -e "  ${RED}${BOLD}5.${NC}  ${RED}Удалить бота${NC}"
+  fi
+  echo -e "  ${BOLD}0.${NC}  Назад"
+  echo ""
+  read -r -p "  Выбор: " choice
+
+  case "$choice" in
+    1) _bot_install ;;
+    2) _bot_restart ;;
+    3) _bot_add_admin ;;
+    4) journalctl -u "$BOT_SERVICE" -f --no-pager -n 50 ;;
+    5)
+      if $installed; then
+        read -r -p "  Точно удалить бота? [y/N]: " del
+        if [[ "${del,,}" == "y" ]]; then
+          _bot_uninstall
+        fi
+      fi
+      ;;
+  esac
+}
+
+_bot_install() {
+  section "Установка Telegram-бота"
+
+  local installer=""
+  for candidate in /opt/mita-panel/install-bot.sh "$SCRIPT_DIR/install-bot.sh"; do
+    [[ -f "$candidate" ]] && { installer="$candidate"; break; }
+  done
+
+  if [[ -z "$installer" ]]; then
+    error "install-bot.sh не найден. Поместите его в /opt/mita-panel/"
+    pause
+    return
+  fi
+
+  read -r -p "Токен бота (от @BotFather): " token
+  [[ -z "$token" ]] && { error "Токен обязателен"; return; }
+
+  read -r -p "Ваш Telegram ID (число, @userinfobot): " admin_id
+  [[ -z "$admin_id" || ! "$admin_id" =~ ^[0-9]+$ ]] && { error "ID должен быть числом"; return; }
+
+  BOT_TOKEN_NONINTERACTIVE="$token" BOT_ADMIN_NONINTERACTIVE="$admin_id" bash "$installer"
+  pause
+}
+
+_bot_restart() {
+  section "Перезапуск бота"
+  BOT_SERVICE="mita-bot"
+  systemctl restart "$BOT_SERVICE" 2>/dev/null || true
+  sleep 1
+  if systemctl is-active --quiet "$BOT_SERVICE"; then
+    ok "Бот перезапущен"
+  else
+    warn "Бот не запустился. Проверьте: journalctl -u $BOT_SERVICE -f"
+  fi
+  pause
+}
+
+_bot_add_admin() {
+  section "Добавление админа"
+  BOT_CONFIG="/etc/mita/bot.json"
+  [[ ! -f "$BOT_CONFIG" ]] && { error "Бот не установлен"; return; }
+
+  read -r -p "Telegram ID нового админа (число): " new_id
+  [[ -z "$new_id" || ! "$new_id" =~ ^[0-9]+$ ]] && { error "ID должен быть числом"; return; }
+
+  python3 -c "
+import json
+with open('$BOT_CONFIG') as f: d=json.load(f)
+ids=d.get('admin_ids',[])
+if '$new_id' not in ids: ids.append('$new_id')
+d['admin_ids']=ids
+with open('$BOT_CONFIG','w') as f: json.dump(d,f,indent=2)
+"
+  systemctl restart mita-bot 2>/dev/null || true
+  ok "Админ $new_id добавлен"
+  pause
+}
+
+_bot_uninstall() {
+  section "Удаление Telegram-бота"
+  BOT_SERVICE="mita-bot"
+  systemctl stop "$BOT_SERVICE" 2>/dev/null || true
+  systemctl disable "$BOT_SERVICE" 2>/dev/null || true
+  rm -f "/etc/systemd/system/${BOT_SERVICE}.service"
+  systemctl daemon-reload 2>/dev/null || true
+  rm -rf /opt/mita-bot
+  rm -f /etc/mita/bot.json
+  ok "Бот удалён"
+  pause
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 9. ПОЛНОЕ УДАЛЕНИЕ
 # ════════════════════════════════════════════════════════════════════════════
 menu_uninstall() {
@@ -1086,6 +1233,7 @@ menu_uninstall() {
   echo -e "    ${YELLOW}•${NC} mita сервер (бинарник, systemd unit, конфиги)"
   echo -e "    ${YELLOW}•${NC} Веб-панель (/opt/mita-panel, systemd unit)"
   echo -e "    ${YELLOW}•${NC} Cloudflare WARP (Docker-контейнер)"
+  echo -e "    ${YELLOW}•${NC} Telegram-бот (/opt/mita-bot, systemd unit)"
   echo -e "    ${YELLOW}•${NC} Все пользователи и пароли (/etc/mita/)"
   echo -e "    ${YELLOW}•${NC} SSL-сертификаты, выпущенные для панели"
   echo -e "    ${YELLOW}•${NC} Правила fail2ban для панели"
@@ -1215,6 +1363,18 @@ except: print('2100-2110')
   rm -f /etc/cron.d/mita-update
   rm -f /usr/local/bin/mita-update-lists
   ok "Cron-задачи удалены"
+
+  # ── 7a. Удалить Telegram-бота ────────────────────────────────────
+  if [[ -f "/etc/systemd/system/mita-bot.service" ]]; then
+    info "Удаление Telegram-бота..."
+    systemctl stop mita-bot 2>/dev/null || true
+    systemctl disable mita-bot 2>/dev/null || true
+    rm -f /etc/systemd/system/mita-bot.service
+    systemctl daemon-reload 2>/dev/null || true
+    rm -rf /opt/mita-bot
+    rm -f /etc/mita/bot.json
+    ok "Telegram-бот удалён"
+  fi
 
   # ── 8. Закрыть порты в firewall ────────────────────────────────
   info "Закрытие портов mita ($_MITA_RANGE) и панели ($_PANEL_PORT) в firewall..."

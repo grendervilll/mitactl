@@ -3,6 +3,7 @@
 mita Web Panel — Flask backend
 """
 import os, json, re, subprocess, secrets, string, random, ipaddress, socket, time, logging
+import psutil
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -174,36 +175,41 @@ def get_warp_ip():
         return "недоступен"
 
 def get_traffic_stats():
-    """Возвращает трафик и статус активности по всем пользователям."""
+    """Возвращает трафик и статус активности по всем пользователям.
+    Данные берутся напрямую из mita get users."""
     raw = mita_cmd("get", "users")
     week_total = month_total = 0.0
     users_stats = []
     today = datetime.now().date()
 
-    # mita get users output format (v3.x):
-    # USER           LAST ACTIVE  1 DAY DOWN  1 DAY UP  30 DAYS DOWN  30 DAYS UP
-    # username       2024-01-01   1.2MiB      0.5MiB    12.3GiB       4.5GiB
-    lines = raw.splitlines()
-    data_lines = []
-    for line in lines:
+    # mita get users output format (8 колонок):
+    # User  LastActive  1DayDown  1DayUp  7DaysDown  7DaysUp  30DaysDown  30DaysUp
+    for line in raw.splitlines():
         line = line.strip()
         if not line or line.upper().startswith("USER"):
             continue
-        data_lines.append(line)
-
-    for line in data_lines:
-        parts = re.split(r"\s{2,}", line.strip())
-        if len(parts) < 3:
-            parts = line.split()
-        if len(parts) < 3:
+        parts = line.split()
+        if len(parts) < 8:
             continue
         try:
             name = parts[0]
+            d1_down  = _parse_traffic(parts[2])
+            d1_up    = _parse_traffic(parts[3])
+            d7_down  = _parse_traffic(parts[4])
+            d7_up    = _parse_traffic(parts[5])
+            d30_down = _parse_traffic(parts[6])
+            d30_up   = _parse_traffic(parts[7])
 
-            # Parse LAST ACTIVE field (parts[1])
-            last_active_raw = parts[1].strip() if len(parts) > 1 else ""
+            d1_bytes = d1_down + d1_up
+            d7_bytes = d7_down + d7_up
+            d30_bytes = d30_down + d30_up
+
+            month_total += d30_bytes
+            week_total  += d7_bytes
+
             online = False
             last_active_display = "никогда"
+            last_active_raw = parts[1]
             if last_active_raw and last_active_raw.lower() not in ("never", "-", "n/a", "никогда"):
                 try:
                     la_date = datetime.strptime(last_active_raw[:10], "%Y-%m-%d").date()
@@ -222,30 +228,13 @@ def get_traffic_stats():
                 except Exception:
                     last_active_display = last_active_raw
 
-            # Find traffic columns — contain units like MiB, GiB, KiB, B
-            traffic_parts = [p for p in parts[1:] if any(u in p for u in ["TiB","GiB","MiB","KiB","iB","B"])]
-            d1_down = d1_up = d30_down = d30_up = 0.0
-            if len(traffic_parts) >= 4:
-                d1_down  = _parse_traffic(traffic_parts[0])
-                d1_up    = _parse_traffic(traffic_parts[1])
-                d30_down = _parse_traffic(traffic_parts[2])
-                d30_up   = _parse_traffic(traffic_parts[3])
-            elif len(traffic_parts) >= 2:
-                d30_down = _parse_traffic(traffic_parts[0])
-                d30_up   = _parse_traffic(traffic_parts[1])
-            else:
-                continue
-
-            d7_bytes = (d30_down + d30_up) / 30 * 7
-            month_total += d30_down + d30_up
-            week_total  += d7_bytes
             users_stats.append({
                 "name":         name,
                 "online":       online,
                 "last_active":  last_active_display,
-                "day_mb":       round((d1_down + d1_up) / 1024 / 1024, 2),
+                "day_mb":       round(d1_bytes / 1024 / 1024, 2),
                 "week_mb":      round(d7_bytes / 1024 / 1024, 2),
-                "month_mb":     round((d30_down + d30_up) / 1024 / 1024, 2),
+                "month_mb":     round(d30_bytes / 1024 / 1024, 2),
             })
         except Exception:
             continue
@@ -472,6 +461,19 @@ def api_dashboard():
         "mita_running": _mita_running(),
     })
 
+@app.route(f"{BASE}/api/stats")
+@login_required
+def api_stats():
+    return jsonify({
+        "cpu":     psutil.cpu_percent(interval=0.5),
+        "ram_pct": psutil.virtual_memory().percent,
+        "ram_used": psutil.virtual_memory().used,
+        "ram_total": psutil.virtual_memory().total,
+        "disk_pct": psutil.disk_usage("/").percent,
+        "disk_used": psutil.disk_usage("/").used,
+        "disk_total": psutil.disk_usage("/").total,
+    })
+
 def _mita_running():
     try:
         r = subprocess.run(["systemctl","is-active","mita"],
@@ -665,6 +667,15 @@ def api_ssl_letsencrypt():
 
     return jsonify({"ok": True, "expires": exp,
                     "note": "Перезапустите панель: systemctl restart mita-panel"})
+
+@app.route(f"{BASE}/api/panel/restart", methods=["POST"])
+@login_required
+def api_panel_restart():
+    r = subprocess.run(["systemctl","restart","mita-panel"],
+                       capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        return jsonify({"ok": False, "error": r.stderr.strip()}), 500
+    return jsonify({"ok": True})
 
 def _update_env(key, value):
     env_file = "/etc/mita/panel.env"
@@ -1005,6 +1016,121 @@ findtime = {ban_time}
         ok_msg = f"Настройки сохранены (fail2ban: {e})"
 
     return jsonify({"ok": True, "message": ok_msg})
+
+# ── API: Telegram Bot ─────────────────────────────────────────────────────────
+BOT_CONFIG_PATH = "/etc/mita/bot.json"
+BOT_DIR         = "/opt/mita-bot"
+BOT_SERVICE     = "mita-bot"
+BOT_INSTALLER   = "/opt/mita-bot/install-bot.sh"
+
+def _bot_installed():
+    return os.path.exists("/etc/systemd/system/mita-bot.service")
+
+def _bot_running():
+    try:
+        r = subprocess.run(["systemctl","is-active",BOT_SERVICE],
+                           capture_output=True, text=True, timeout=3)
+        return r.stdout.strip() == "active"
+    except Exception:
+        return False
+
+def _load_bot_config():
+    try:
+        return json.loads(Path(BOT_CONFIG_PATH).read_text())
+    except Exception:
+        return {}
+
+@app.route(f"{BASE}/api/bot/status")
+@login_required
+def api_bot_status():
+    installed = _bot_installed()
+    running   = _bot_running() if installed else False
+    cfg       = _load_bot_config() if installed else {}
+    return jsonify({
+        "installed": installed,
+        "running":   running,
+        "token":     (cfg.get("token","")[:8]+"…") if cfg.get("token") else "",
+        "admin_ids": cfg.get("admin_ids", []),
+    })
+
+@app.route(f"{BASE}/api/bot/install", methods=["POST"])
+@login_required
+def api_bot_install():
+    data      = request.get_json(silent=True) or {}
+    token     = data.get("token","").strip()
+    admin_id  = str(data.get("admin_id","")).strip()
+
+    if not token:
+        return jsonify({"ok": False, "error": "Токен обязателен"}), 400
+    if not admin_id or not admin_id.isdigit():
+        return jsonify({"ok": False, "error": "Telegram ID должен быть числом"}), 400
+
+    # Ищем install-bot.sh рядом с app.py или в /opt/mita-panel
+    installer = None
+    for candidate in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "install-bot.sh"),
+        "/opt/mita-panel/install-bot.sh",
+    ]:
+        if os.path.exists(candidate):
+            installer = candidate
+            break
+
+    if not installer:
+        return jsonify({"ok": False, "error": "install-bot.sh не найден. Поместите его в /opt/mita-panel/"}), 500
+
+    # Передаём в install-bot.sh через env
+    env = os.environ.copy()
+    env["BOT_TOKEN_NONINTERACTIVE"] = token
+    env["BOT_ADMIN_NONINTERACTIVE"] = admin_id
+
+    r = subprocess.run(["bash", installer], capture_output=True, text=True,
+                       env=env, timeout=120)
+    if r.returncode != 0:
+        return jsonify({"ok": False, "error": r.stderr.strip() or r.stdout.strip()[-500:]}), 500
+
+    running = _bot_running()
+    return jsonify({"ok": True, "running": running, "output": r.stdout.strip()[-500:]})
+
+@app.route(f"{BASE}/api/bot/uninstall", methods=["POST"])
+@login_required
+def api_bot_uninstall():
+    subprocess.run(["systemctl","stop",BOT_SERVICE], capture_output=True)
+    subprocess.run(["systemctl","disable",BOT_SERVICE], capture_output=True)
+    Path("/etc/systemd/system/mita-bot.service").unlink(missing_ok=True)
+    subprocess.run(["systemctl","daemon-reload"], capture_output=True)
+    import shutil
+    if os.path.isdir(BOT_DIR):
+        shutil.rmtree(BOT_DIR)
+    Path(BOT_CONFIG_PATH).unlink(missing_ok=True)
+    return jsonify({"ok": True})
+
+@app.route(f"{BASE}/api/bot/config", methods=["GET","POST"])
+@login_required
+def api_bot_config():
+    if request.method == "POST":
+        data     = request.get_json(silent=True) or {}
+        token    = data.get("token","").strip()
+        admin_id = str(data.get("admin_id","")).strip()
+
+        if not _bot_installed():
+            return jsonify({"ok": False, "error": "Бот не установлен"}), 400
+
+        cfg = _load_bot_config()
+        if token:
+            cfg["token"] = token
+        if admin_id:
+            if admin_id not in cfg.get("admin_ids", []):
+                cfg.setdefault("admin_ids", []).append(admin_id)
+
+        Path(BOT_CONFIG_PATH).write_text(json.dumps(cfg, indent=2))
+        subprocess.run(["systemctl","restart",BOT_SERVICE], capture_output=True)
+        return jsonify({"ok": True})
+
+    cfg = _load_bot_config()
+    return jsonify({
+        "token":     cfg.get("token",""),
+        "admin_ids": cfg.get("admin_ids", []),
+    })
 
 # ── API: скачать конфиг как файл ─────────────────────────────────────────────
 @app.route(f"{BASE}/api/users/config/download")

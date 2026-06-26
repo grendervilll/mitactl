@@ -30,6 +30,32 @@
       <div id="s-mita-status" style="margin-top:6px"><span class="badge badge-off">—</span></div>
     </div>
   </div>
+
+  <div class="card">
+    <div class="card-title">Мониторинг сервера</div>
+    <div class="grid-4" style="margin-bottom:0">
+      <div class="stat-card">
+        <div class="stat-label">CPU</div>
+        <div class="stat-value accent" id="s-cpu">—</div>
+        <div class="stat-sub">%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">RAM</div>
+        <div class="stat-value" id="s-ram-pct">—</div>
+        <div class="stat-sub" id="s-ram-detail" style="white-space:nowrap">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Диск</div>
+        <div class="stat-value" id="s-disk-pct">—</div>
+        <div class="stat-sub" id="s-disk-detail" style="white-space:nowrap">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Аптайм</div>
+        <div class="stat-value" style="font-size:1.1rem" id="s-uptime">—</div>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-title">Быстрые действия</div>
     <div class="btn-group">
@@ -153,11 +179,16 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Применение сертификата</div>
-    <div class="alert alert-warn">
-      После смены сертификата необходимо перезапустить панель:<br>
-      <code style="font-family:var(--mono);font-size:.85rem">systemctl restart mita-panel</code>
-    </div>
+    <div class="card-title">Перезапуск панели</div>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:14px;line-height:1.6">
+      После смены сертификата необходимо перезапустить панель, чтобы применить изменения.
+    </p>
+    <button class="btn btn-warn" onclick="restartPanel()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Перезапустить панель
+    </button>
+    <div id="restart-result" style="margin-top:12px"></div>
+  </div>
   </div>
 </div>
 
@@ -220,6 +251,63 @@
   </div>
 </div>
 
+<!-- TELEGRAM BOT -->
+<div class="page" id="page-bot">
+  <h1>Telegram бот</h1>
+  <p class="subtitle">Управление сервером через Telegram</p>
+
+  <div class="card" id="bot-status-card">
+    <div class="card-title">Статус бота</div>
+    <div id="bot-status-body"><div style="color:var(--muted)">Загрузка...</div></div>
+  </div>
+
+  <div class="card" id="bot-install-card" style="display:none">
+    <div class="card-title">Установка бота</div>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:18px;line-height:1.6">
+      Создайте бота через <strong style="color:var(--accent)">@BotFather</strong> в Telegram,
+      скопируйте токен и узнайте ваш Telegram ID через <strong style="color:var(--accent)">@userinfobot</strong>.
+    </p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Токен бота (от @BotFather)</label>
+        <input type="text" id="bot-token" placeholder="123456:ABC-DEF1234gh...">
+      </div>
+      <div class="form-group" style="max-width:200px">
+        <label>Ваш Telegram ID</label>
+        <input type="text" id="bot-admin-id" placeholder="123456789">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="installBot()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+      Установить / обновить
+    </button>
+    <div id="bot-install-result" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card" id="bot-manage-card" style="display:none">
+    <div class="card-title">Управление</div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="restartBot()">⟳ Перезапустить</button>
+      <button class="btn btn-danger" onclick="uninstallBot()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        Удалить бота
+      </button>
+    </div>
+    <div class="divider"></div>
+    <div class="card-title" style="margin-bottom:12px">Добавить админа</div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:220px">
+        <label>Telegram ID</label>
+        <input type="text" id="bot-add-admin-id" placeholder="123456789">
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="addBotAdmin()">Добавить</button>
+    </div>
+    <div id="bot-admin-result" style="margin-top:12px"></div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -247,6 +335,54 @@ async function loadDashboard(){
     :'<span class="badge" style="background:rgba(255,95,109,.15);color:var(--danger)">● Остановлен</span>';
 }
 loadDashboard();
+
+let _statsTimer=null;
+startStatsPolling();
+
+function fmtBytes(b){
+  if(b>=1024**4)return(b/1024**4).toFixed(1)+' ТБ';
+  if(b>=1024**3)return(b/1024**3).toFixed(1)+' ГБ';
+  if(b>=1024**2)return(b/1024**2).toFixed(0)+' МБ';
+  if(b>=1024)   return(b/1024).toFixed(0)+' КБ';
+  return b+' Б';
+}
+
+async function loadServerStats(){
+  const d=await api('/api/stats');
+  if(!d)return;
+
+  const cpuEl=document.getElementById('s-cpu');
+  if(cpuEl){
+    cpuEl.textContent=d.cpu.toFixed(1);
+    cpuEl.style.color=d.cpu>80?'var(--danger)':d.cpu>50?'var(--warn)':'var(--accent)';
+  }
+
+  const ramPctEl=document.getElementById('s-ram-pct');
+  if(ramPctEl){
+    ramPctEl.textContent=d.ram_pct.toFixed(1)+'%';
+    ramPctEl.style.color=d.ram_pct>90?'var(--danger)':d.ram_pct>70?'var(--warn)':'var(--text)';
+  }
+  const ramDetail=document.getElementById('s-ram-detail');
+  if(ramDetail)ramDetail.textContent=fmtBytes(d.ram_used)+' / '+fmtBytes(d.ram_total);
+
+  const diskPctEl=document.getElementById('s-disk-pct');
+  if(diskPctEl){
+    diskPctEl.textContent=d.disk_pct.toFixed(1)+'%';
+    diskPctEl.style.color=d.disk_pct>90?'var(--danger)':d.disk_pct>75?'var(--warn)':'var(--text)';
+  }
+  const diskDetail=document.getElementById('s-disk-detail');
+  if(diskDetail)diskDetail.textContent=fmtBytes(d.disk_used)+' / '+fmtBytes(d.disk_total);
+}
+
+function startStatsPolling(){
+  stopStatsPolling();
+  loadServerStats();
+  _statsTimer=setInterval(loadServerStats,2000);
+}
+
+function stopStatsPolling(){
+  if(_statsTimer){clearInterval(_statsTimer);_statsTimer=null;}
+}
 
 function showClients(){
   const clients=[
@@ -755,7 +891,110 @@ async function getLetsEncrypt(){
   }
 }
 
-// ──────────────── SECURITY / FAIL2BAN ────────────────
+async function restartPanel(){
+  const btn=document.querySelector('#page-ssl .btn-warn');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span> Перезапуск...';
+  const el=document.getElementById('restart-result');
+  try{
+    const d=await api('/api/panel/restart','POST');
+    if(d?.ok){
+      el.innerHTML='<div class="alert alert-ok">✓ Панель перезапущена</div>';
+      showToast('Панель перезапущена');
+    }else{
+      el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
+    }
+  }catch(e){
+    el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(e.message)}</div>`;
+  }
+  btn.disabled=false;
+  btn.innerHTML='<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Перезапустить панель';
+}
+
+// ──────────────── TELEGRAM BOT ────────────────
+async function loadBotPage() {
+  const d = await api('/api/bot/status');
+  if (!d) return;
+  const statusEl = document.getElementById('bot-status-body');
+  const installEl = document.getElementById('bot-install-card');
+  const manageEl  = document.getElementById('bot-manage-card');
+
+  if (d.installed) {
+    statusEl.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="badge badge-ok">Установлен</span>
+        ${d.running
+          ? '<span class="badge badge-ok">● Активен</span>'
+          : '<span class="badge" style="background:rgba(255,95,109,.15);color:var(--danger)">● Остановлен</span>'}
+      </div>
+      <div style="font-size:.85rem;color:var(--muted)">
+        Токен: <code style="color:var(--accent)">${escH(d.token||'—')}</code>
+      </div>
+      <div style="font-size:.85rem;color:var(--muted);margin-top:4px">
+        Админы (Telegram ID): <strong style="color:var(--text)">${escH((d.admin_ids||[]).join(', ')||'—')}</strong>
+      </div>`;
+    installEl.style.display = 'none';
+    manageEl.style.display = '';
+  } else {
+    statusEl.innerHTML = '<div style="color:var(--warn)">Бот не установлен</div>';
+    installEl.style.display = '';
+    manageEl.style.display = 'none';
+  }
+}
+
+async function installBot() {
+  const token   = document.getElementById('bot-token').value.trim();
+  const adminId = document.getElementById('bot-admin-id').value.trim();
+  if (!token)   { showToast('Введите токен', true); return; }
+  if (!adminId) { showToast('Введите Telegram ID', true); return; }
+
+  const btn = document.querySelector('#bot-install-card .btn-primary');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Установка...';
+  const d = await api('/api/bot/install', 'POST', {token, admin_id: adminId});
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg> Установить / обновить';
+
+  const el = document.getElementById('bot-install-result');
+  if (d?.ok) {
+    el.innerHTML = `<div class="alert alert-ok">✓ Бот установлен и ${d.running ? 'запущен' : 'установлен (проверьте логи)'}</div>`;
+    showToast('Бот установлен');
+    loadBotPage();
+  } else {
+    el.innerHTML = `<div class="alert alert-err">Ошибка: ${escH(d?.error||d?.output||'')}</div>`;
+  }
+}
+
+async function uninstallBot() {
+  if (!confirm('Удалить Telegram-бота? Это действие необратимо.')) return;
+  await api('/api/bot/uninstall', 'POST');
+  showToast('Бот удалён');
+  loadBotPage();
+}
+
+async function restartBot() {
+  const d = await api('/api/bot/config', 'POST', {});
+  if (d?.ok) {
+    showToast('Бот перезапущен');
+    setTimeout(loadBotPage, 1500);
+  } else {
+    showToast('Ошибка перезапуска', true);
+  }
+}
+
+async function addBotAdmin() {
+  const id = document.getElementById('bot-add-admin-id').value.trim();
+  if (!id) { showToast('Введите Telegram ID', true); return; }
+  const d = await api('/api/bot/config', 'POST', {admin_id: id});
+  const el = document.getElementById('bot-admin-result');
+  if (d?.ok) {
+    el.innerHTML = '<div class="alert alert-ok">✓ Админ добавлен</div>';
+    document.getElementById('bot-add-admin-id').value = '';
+    loadBotPage();
+  } else {
+    el.innerHTML = `<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
+  }
+}
 async function loadSecurityPage() {
   const d = await api('/api/fail2ban/status');
   if (!d) return;

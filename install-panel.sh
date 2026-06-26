@@ -74,8 +74,8 @@ PANEL_DIR="/opt/mita-panel"
 mkdir -p "$PANEL_DIR"
 
 python3 -m venv "$PANEL_DIR/venv"
-"$PANEL_DIR/venv/bin/pip" install -q flask gunicorn pyyaml 2>/dev/null
-ok "Python venv и Flask установлены"
+"$PANEL_DIR/venv/bin/pip" install -q flask gunicorn pyyaml psutil 2>/dev/null
+ok "Python venv, Flask и зависимости установлены"
 
 # ── копирование файлов ─────────────────────────────────────────────
 section "Копирование файлов панели"
@@ -236,11 +236,36 @@ elif command -v iptables &>/dev/null; then
   ok "iptables: порт $PANEL_PORT открыт"
 fi
 
+# ── авто-генерация самоподписного сертификата ─────────────────────
+section "SSL-сертификат"
+SSL_DIR="/etc/mita/ssl"
+mkdir -p "$SSL_DIR"
+SSL_CERT="$SSL_DIR/selfsigned.crt"
+SSL_KEY="$SSL_DIR/selfsigned.key"
+
+info "Создание самоподписного сертификата (10 лет)..."
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout "$SSL_KEY" -out "$SSL_CERT" \
+  -subj "/CN=mita-panel/O=mita/C=XX" 2>/dev/null
+
+echo "SSL_CERT=$SSL_CERT" >> /etc/mita/panel.env
+echo "SSL_KEY=$SSL_KEY"  >> /etc/mita/panel.env
+
+python3 -c "
+import json
+with open('$PANEL_CONFIG') as f: d=json.load(f)
+d.update({'ssl_type':'selfsigned','ssl_cert':'$SSL_CERT','ssl_key':'$SSL_KEY'})
+with open('$PANEL_CONFIG','w') as f: json.dump(d,f,indent=2)
+"
+systemctl restart mita-panel 2>/dev/null || true
+ok "Самоподписной сертификат установлен, панель перезапущена с HTTPS"
+
+PROTO="https"
+
 # ── итог ──────────────────────────────────────────────────────────
 section "Установка завершена!"
 
 SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-PROTO="http"
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗"
@@ -261,9 +286,10 @@ echo ""
 echo -e "${CYAN}Полная ссылка для браузера:${NC}"
 echo -e "  ${BOLD}${GREEN}${PROTO}://${SERVER_IP}:${PANEL_PORT}/${SECRET_PATH}/${NC}"
 echo ""
-echo -e "${CYAN}Настройка SSL (опционально):${NC}"
-echo -e "  Войдите в панель → раздел SSL → выберите тип сертификата"
-echo -e "  После установки SSL: ${BOLD}systemctl restart mita-panel${NC}"
+echo -e "${CYAN}SSL:${NC}"
+echo -e "  Сертификат: самоподписной (10 лет), уже установлен"
+echo -e "  Браузер покажет предупреждение — примите его"
+echo -e "  Заменить на Let's Encrypt: раздел SSL в панели или mita-ctl → пункт 3"
 echo ""
 echo -e "${CYAN}Полезные команды:${NC}"
 echo -e "  ${YELLOW}systemctl status mita-panel${NC}      — статус"
@@ -285,7 +311,7 @@ if [[ "$ACCESS_MODE" == "ssh" ]]; then
   echo -e "  ${YELLOW}ssh -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT} -p ${SSH_ACCESS_PORT} root@${SERVER_IP} -N${NC}"
   echo ""
   echo -e "  Затем откройте в браузере:"
-  echo -e "  ${BOLD}${GREEN}http://127.0.0.1:${PANEL_PORT}/${SECRET_PATH}/${NC}"
+  echo -e "  ${BOLD}${GREEN}${PROTO}://127.0.0.1:${PANEL_PORT}/${SECRET_PATH}/${NC}"
   echo ""
   echo -e "  Для фонового режима:"
   echo -e "  ${YELLOW}ssh -fN -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT} -p ${SSH_ACCESS_PORT} root@${SERVER_IP}${NC}"

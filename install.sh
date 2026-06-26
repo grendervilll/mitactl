@@ -740,6 +740,83 @@ else
   fi
 fi
 
+# ═══════════════════════════════════════════════════════════════════════
+# УСТАНОВКА TELEGRAM-БОТА (опционально)
+# ═══════════════════════════════════════════════════════════════════════
+section "Telegram-бот"
+
+BOT_INSTALLER=""
+for candidate in \
+  "$SCRIPT_DIR/install-bot.sh" \
+  "$SCRIPT_DIR/mita-bot-pkg/install-bot.sh"
+do
+  if [[ -f "$candidate" ]]; then
+    BOT_INSTALLER="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$BOT_INSTALLER" ]]; then
+  warn "install-bot.sh не найден рядом со скриптом."
+  warn "Поместите bot.py и install-bot.sh рядом с install.sh для установки бота."
+else
+  echo -e "Установить Telegram-бота для управления сервером?"
+  echo -e "  Бот позволит: создавать/удалять пользователей, смотреть трафик,"
+  echo -e "  включать WARP, мониторить CPU/RAM/диск — всё через Telegram."
+  echo ""
+  echo -e "  ${GREEN}y${NC} — да, установить сейчас (потребуется токен и Telegram ID)"
+  echo -e "  ${YELLOW}n${NC} — пропустить (установить позже: bash $BOT_INSTALLER или через веб-панель)"
+  echo ""
+  read -r -p "Установить бота? [y/N]: " INSTALL_BOT
+  echo ""
+
+  if [[ "${INSTALL_BOT,,}" == "y" || "${INSTALL_BOT,,}" == "yes" ]]; then
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Инструкция по созданию бота${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${BOLD}1.${NC} Откройте Telegram и найдите ${GREEN}@BotFather${NC}"
+    echo -e "     Отправьте команду ${YELLOW}/newbot${NC}"
+    echo -e "     Следуйте инструкциям: придумайте имя и username бота"
+    echo -e "     В ответ вы получите ${BOLD}токен${NC} — длинную строку вида:"
+    echo -e "     ${YELLOW}1234567890:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw${NC}"
+    echo ""
+    echo -e "  ${BOLD}2.${NC} Найдите ${GREEN}@userinfobot${NC} и нажмите /start"
+    echo -e "     Он покажет ваш ${BOLD}Telegram ID${NC} — число (например 123456789)"
+    echo ""
+    echo -e "  ${BOLD}3.${NC} Когда токен и ID готовы — нажмите Enter для продолжения"
+
+    while true; do
+      echo ""
+      read -r -p "  Впишите токен от @BotFather: " BOT_TOKEN
+      if [[ -z "$BOT_TOKEN" ]]; then
+        warn "Токен не может быть пустым"
+        continue
+      fi
+      break
+    done
+
+    while true; do
+      echo ""
+      read -r -p "  Впишите ваш Telegram ID (число): " BOT_ADMIN
+      if [[ -z "$BOT_ADMIN" || ! "$BOT_ADMIN" =~ ^[0-9]+$ ]]; then
+        warn "Telegram ID должен быть числом (узнайте у @userinfobot)"
+        continue
+      fi
+      break
+    done
+
+    echo ""
+    info "Запуск установки Telegram-бота..."
+    BOT_TOKEN_NONINTERACTIVE="$BOT_TOKEN" BOT_ADMIN_NONINTERACTIVE="$BOT_ADMIN" bash "$BOT_INSTALLER"
+  else
+    info "Пропускаем установку бота."
+    echo -e "  Установить позже: ${YELLOW}bash $BOT_INSTALLER${NC}"
+    echo -e "  Или через веб-панель: раздел «Telegram бот»"
+  fi
+fi
+
 # ── Установка mita-ctl как системной команды ──────────────────────
 section "Установка утилиты управления mita-ctl"
 CTL_SRC="$SCRIPT_DIR/mita-ctl.sh"
