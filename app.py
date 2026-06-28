@@ -883,13 +883,15 @@ def api_warp_rules_set():
 
     return jsonify({"ok": True})
 
-def _rebuild_egress(pc):
+def _rebuild_egress(pc=None):
     """
     Глобальный WARP-egress:
       - WARP вкл у пользователя БЕЗ правил → весь трафик через WARP
       - WARP вкл ТОЛЬКО с правилами → указанные домены/IP через WARP, остальное DIRECT
       - WARP выкл у всех → egress удаляется
+    Всегда перечитывает panel.json с диска чтобы избежать race condition.
     """
+    pc = load_panel_config()  # всегда свежая копия с диска
     warp_users = set(pc.get("warp_users", []))
     cfg = load_mita_config()
 
