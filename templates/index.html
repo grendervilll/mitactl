@@ -95,6 +95,13 @@
         <label>Имя пользователя</label>
         <input type="text" id="create-name" placeholder="например: vasya">
       </div>
+      <div class="form-group" style="max-width:160px">
+        <label>Сложность пароля</label>
+        <select id="create-pwd-mode">
+          <option value="hard">Сложный</option>
+          <option value="easy">Лёгкий</option>
+        </select>
+      </div>
       <div>
         <button class="btn btn-primary" onclick="createUsers()">
           <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
@@ -490,17 +497,18 @@ toggleCreateMode();
 
 async function createUsers(){
   const mode=document.getElementById('create-mode').value;
-  let body={};
+  const pwdMode=document.getElementById('create-pwd-mode').value;
+  let body={password_mode:pwdMode};
   if(mode==='auto'){
-    body={mode:'auto',count:parseInt(document.getElementById('create-count').value)||1};
+    body={...body,mode:'auto',count:parseInt(document.getElementById('create-count').value)||1};
   }else if(mode==='manual'){
     const n=document.getElementById('create-name').value.trim();
     if(!n){showToast('Введите имя',true);return;}
-    body={mode:'manual',names:[n],count:1};
+    body={...body,mode:'manual',names:[n],count:1};
   }else{
     const lines=document.getElementById('bulk-names').value.split('\n').map(s=>s.trim()).filter(Boolean);
     if(!lines.length){showToast('Введите имена',true);return;}
-    body={mode:'manual',names:lines,count:lines.length};
+    body={...body,mode:'manual',names:lines,count:lines.length};
   }
   const d=await api('/api/users/create','POST',body);
   if(!d||!d.created){showToast('Ошибка',true);return;}

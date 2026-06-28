@@ -87,6 +87,7 @@ main_menu() {
     echo -e "  ${RED}${BOLD}9.${NC}  ${RED}Полное удаление mita, панели и WARP${NC}"
     echo -e "  ${BOLD}10.${NC} Показать текущую конфигурацию"
     echo -e "  ${BOLD}11.${NC} Управление Telegram-ботом"
+    echo -e "  ${BOLD}12.${NC} ${CYAN}Обновить панель и утилиты из GitHub${NC}"
     echo -e "  ${BOLD}0.${NC}  Выход"
     echo ""
     read -r -p "  Выберите пункт: " choice
@@ -102,6 +103,7 @@ main_menu() {
       9) menu_uninstall ;;
       10) menu_show_config ;;
       11) menu_bot ;;
+      12) menu_update ;;
       0) exit 0 ;;
       *) warn "Неверный выбор" ;;
     esac
@@ -530,11 +532,23 @@ for u in users: print(f'  - {u[\"name\"]}')
   echo ""
   read -r -p "  Выбор: " choice
 
+  # Запрашиваем сложность пароля один раз перед созданием
+  local pwd_mode="hard"
+  if [[ "$choice" == "1" || "$choice" == "2" ]]; then
+    echo ""
+    echo -e "  ${BOLD}Сложность пароля:${NC}"
+    echo -e "  ${BOLD}1.${NC}  Лёгкий — A-Z, a-z, 0-9, -._~*+ (без спецсимволов)"
+    echo -e "  ${BOLD}2.${NC}  Сложный — со спецсимволами (по умолчанию)"
+    echo ""
+    read -r -p "  Выбор [2]: " pwd_choice
+    [[ "$pwd_choice" == "1" ]] && pwd_mode="easy"
+  fi
+
   case "$choice" in
     1)
       read -r -p "Имя пользователя: " uname
       [[ -z "$uname" ]] && { warn "Имя не указано"; pause; return; }
-      _create_user "$uname"
+      _create_user "$uname" "$pwd_mode"
       pause ;;
     2)
       read -r -p "Количество пользователей: " cnt
@@ -545,7 +559,7 @@ for u in users: print(f'  - {u[\"name\"]}')
         noun=$(shuf -n1 -e fox hawk river storm ember peak orbit tide frost spark 2>/dev/null || echo "node")
         rnd=$((RANDOM % 9000 + 1000))
         uname="${adj}_${noun}_${rnd}"
-        _create_user "$uname"
+        _create_user "$uname" "$pwd_mode"
       done
       pause ;;
     3)
@@ -589,8 +603,13 @@ PYEOF
 
 _create_user() {
   local uname="$1"
+  local pwd_mode="$2"
   local pass
-  pass=$(openssl rand -base64 48 | tr -d '/+=' | head -c 48)
+  if [[ "$pwd_mode" == "easy" ]]; then
+    pass=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9-._~*+' | head -c 32)
+  else
+    pass=$(openssl rand -base64 48 | tr -d '/+=' | head -c 48)
+  fi
 
   # Записываем пользователя в JSON и проверяем результат явно
   local py_result
@@ -1244,6 +1263,88 @@ _bot_uninstall() {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# 12. ОБНОВЛЕНИЕ ПАНЕЛИ И УТИЛИТ ИЗ GITHUB
+# ════════════════════════════════════════════════════════════════════════════
+menu_update() {
+  section "Обновление панели и утилит из GitHub"
+
+  REPO_URL="https://github.com/grendervilll/mitactl.git"
+  TMP_DIR="/tmp/mita-update-$$"
+  PANEL_DIR="/opt/mita-panel"
+  BOT_DIR="/opt/mita-bot"
+
+  info "Репозиторий: $REPO_URL"
+
+  if ! command -v git &>/dev/null; then
+    info "Установка git..."
+    apt-get install -y -qq git 2>/dev/null || { error "Не удалось установить git"; return; }
+  fi
+
+  info "Клонирование репозитория..."
+  rm -rf "$TMP_DIR"
+  if ! git clone --depth 1 "$REPO_URL" "$TMP_DIR" 2>/dev/null; then
+    error "Не удалось клонировать репозиторий. Проверьте URL и доступ в интернет."
+    rm -rf "$TMP_DIR"
+    pause
+    return
+  fi
+  ok "Клонировано в $TMP_DIR"
+
+  local updated=()
+
+  # ── веб-панель ─────────────────────────────────────────────────
+  if [[ -d "$PANEL_DIR" && -d "$PANEL_DIR/templates" ]]; then
+    info "Обновление веб-панели..."
+    [[ -f "$TMP_DIR/app.py" ]] && cp "$TMP_DIR/app.py" "$PANEL_DIR/" && updated+=("веб-панель (app.py)")
+    if [[ -d "$TMP_DIR/templates" ]]; then
+      rsync -a --delete "$TMP_DIR/templates/" "$PANEL_DIR/templates/" 2>/dev/null || \
+        cp -r "$TMP_DIR/templates/"* "$PANEL_DIR/templates/"
+      updated+=("веб-панель (templates)")
+    fi
+    [[ -d "$TMP_DIR/static" ]] && mkdir -p "$PANEL_DIR/static" && cp -r "$TMP_DIR/static/"* "$PANEL_DIR/static/" 2>/dev/null && updated+=("веб-панель (static)")
+    systemctl restart mita-panel 2>/dev/null || true
+    ok "Веб-панель обновлена"
+  else
+    info "Веб-панель не установлена — пропускаем"
+  fi
+
+  # ── Telegram-бот ────────────────────────────────────────────────
+  if [[ -d "$BOT_DIR" && -f "$TMP_DIR/bot.py" ]]; then
+    info "Обновление Telegram-бота..."
+    cp "$TMP_DIR/bot.py" "$BOT_DIR/"
+    systemctl restart mita-bot 2>/dev/null || true
+    ok "Бот обновлён"
+    updated+=("Telegram-бот")
+  else
+    info "Бот не установлен — пропускаем"
+  fi
+
+  # ── mita-ctl ────────────────────────────────────────────────────
+  if [[ -f "$TMP_DIR/mita-ctl.sh" ]]; then
+    info "Обновление mita-ctl..."
+    cp "$TMP_DIR/mita-ctl.sh" /usr/local/bin/mita-ctl
+    chmod +x /usr/local/bin/mita-ctl
+    ok "mita-ctl обновлён"
+    updated+=("mita-ctl")
+  fi
+
+  # ── install-bot.sh ──────────────────────────────────────────────
+  [[ -f "$TMP_DIR/install-bot.sh" ]] && cp "$TMP_DIR/install-bot.sh" "$PANEL_DIR/" 2>/dev/null && updated+=("install-bot.sh")
+
+  rm -rf "$TMP_DIR"
+
+  echo ""
+  if [[ ${#updated[@]} -gt 0 ]]; then
+    ok "Обновлено: ${updated[*]}"
+  else
+    warn "Ничего не обновлено — установите компоненты перед обновлением"
+  fi
+
+  echo -e "  ${YELLOW}Рекомендуется перезапустить сессию mita-ctl для применения обновления самой утилиты.${NC}"
+  pause
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 9. ПОЛНОЕ УДАЛЕНИЕ
 # ════════════════════════════════════════════════════════════════════════════
 menu_uninstall() {
@@ -1306,10 +1407,13 @@ except: print('2100-2110')
   fi
   _PANEL_PORT=${_PANEL_PORT:-8080}
 
-  # Автодетект текущего SSH порта из sshd_config (чтобы не трогать его при чистке)
-  _SSH_PORT=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
-  _SSH_PORT=${_SSH_PORT:-22}
-  info "Обнаружен SSH порт: $_SSH_PORT (будет сохранён)"
+  # Определяем SSH порт — пользователь вводит сам, автоопределение как подсказка
+  _SSH_DETECTED=$(grep -E "^[[:space:]]*Port[[:space:]]+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
+  _SSH_DETECTED=${_SSH_DETECTED:-22}
+  echo ""
+  read -r -p "  SSH порт, который НЕ нужно закрывать [${_SSH_DETECTED}]: " _SSH_INPUT
+  _SSH_PORT="${_SSH_INPUT:-$_SSH_DETECTED}"
+  info "SSH порт $_SSH_PORT будет сохранён"
   info "Порты mita для закрытия: $_MITA_RANGE"
   info "Порт панели для закрытия: $_PANEL_PORT"
 

@@ -141,10 +141,11 @@ def mita_cmd(*args):
     r = subprocess.run(["mita", *args], capture_output=True, text=True)
     return r.stdout.strip()
 
-def gen_password(length=64):
-    # Буквы и цифры только — спецсимволы могут ломать mita protobuf парсинг
-    # Используем расширенный безопасный набор без проблемных символов
-    chars = string.ascii_letters + string.digits + "!@#%^*_-=+?."
+def gen_password(length=64, mode="hard"):
+    if mode == "easy":
+        chars = string.ascii_letters + string.digits + "-._~*+"
+    else:
+        chars = string.ascii_letters + string.digits + "!@#%^*_-=+?."
     return "".join(secrets.choice(chars) for _ in range(length))
 
 def gen_username():
@@ -509,6 +510,7 @@ def api_users_create():
     count = int(data.get("count", 1))
     mode  = data.get("mode", "manual")   # manual | auto
     names = data.get("names", [])        # для manual
+    pwd_mode = data.get("password_mode", "hard")  # easy | hard
 
     cfg   = load_mita_config()
     existing = {u["name"] for u in cfg.get("users", [])}
@@ -527,7 +529,7 @@ def api_users_create():
         if name in existing:
             continue
 
-        password = gen_password()
+        password = gen_password(mode=pwd_mode)
         cfg.setdefault("users", []).append({"name": name, "password": password})
         existing.add(name)
         created.append({

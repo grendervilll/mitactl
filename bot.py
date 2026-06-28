@@ -82,8 +82,11 @@ def _mita_running():
     except Exception:
         return False
 
-def gen_password(length=64):
-    chars = string.ascii_letters + string.digits + "!@#%^*_-=+?."
+def gen_password(length=64, mode="hard"):
+    if mode == "easy":
+        chars = string.ascii_letters + string.digits + "-._~*+"
+    else:
+        chars = string.ascii_letters + string.digits + "!@#%^*_-=+?."
     return "".join(secrets.choice(chars) for _ in range(length))
 
 def gen_username():
@@ -222,13 +225,28 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def create_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    await query.edit_message_text(
+        "➕ *Создать пользователя*\n\nВыберите сложность пароля:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔓 Лёгкий (A-Z, 0-9, -._~*+)", callback_data="create_easy")],
+            [InlineKeyboardButton("🔐 Сложный (со спецсимволами)", callback_data="create_hard")],
+            [InlineKeyboardButton("« Назад", callback_data="main")],
+        ]),
+        parse_mode="MarkdownV2"
+    )
+
+@admin_only
+async def create_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pwd_mode = "easy" if query.data == "create_easy" else "hard"
     cfg = load_mita_config()
     existing = {u["name"] for u in cfg.get("users", [])}
     name = gen_username()
     while name in existing:
         name = gen_username()
 
-    password = gen_password()
+    password = gen_password(mode=pwd_mode)
     cfg.setdefault("users", []).append({"name": name, "password": password})
     Path(MITA_CONFIG).write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
 
@@ -625,6 +643,8 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await show_users(update, context)
     elif data == "create":
         return await create_user(update, context)
+    elif data in ("create_easy", "create_hard"):
+        return await create_exec(update, context)
     elif data == "delete_menu":
         return await delete_menu(update, context)
     elif data.startswith("delete_"):
