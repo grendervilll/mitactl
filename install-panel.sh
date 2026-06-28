@@ -74,7 +74,10 @@ PANEL_DIR="/opt/mita-panel"
 mkdir -p "$PANEL_DIR"
 
 python3 -m venv "$PANEL_DIR/venv"
-"$PANEL_DIR/venv/bin/pip" install -q flask gunicorn pyyaml psutil 2>/dev/null
+info "Установка Flask и зависимостей (может занять до минуты)..."
+PIP_REQUIRE_VIRTUALENV=false "$PANEL_DIR/venv/bin/pip" install \
+    --no-input --quiet --disable-pip-version-check \
+    flask gunicorn pyyaml psutil
 ok "Python venv, Flask и зависимости установлены"
 
 # ── копирование файлов ─────────────────────────────────────────────
