@@ -1273,6 +1273,24 @@ menu_update() {
   PANEL_DIR="/opt/mita-panel"
   BOT_DIR="/opt/mita-bot"
 
+  echo ""
+  echo -e "  ${GREEN}Будут обновлены только файлы кода:${NC}"
+  echo -e "    • веб-панель: app.py, templates/, static/"
+  echo -e "    • Telegram-бот: bot.py"
+  echo -e "    • CLI-утилита: mita-ctl.sh"
+  echo ""
+  echo -e "  ${GREEN}НЕ затрагиваются:${NC}"
+  echo -e "    • пользователи и пароли (/etc/mita/server_config.json)"
+  echo -e "    • данные админа, SSL, fail2ban, WARP (/etc/mita/panel.json)"
+  echo -e "    • сертификаты (/etc/mita/ssl/)"
+  echo -e "    • токен бота и ID админов (/etc/mita/bot.json)"
+  echo -e "    • все конфиги и настройки остаются нетронутыми"
+  echo ""
+
+  read -r -p "  Продолжить обновление? [y/N]: " confirm
+  [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]] && { warn "Отменено"; pause; return; }
+
+  echo ""
   info "Репозиторий: $REPO_URL"
 
   if ! command -v git &>/dev/null; then

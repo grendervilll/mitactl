@@ -296,7 +296,6 @@ def build_singbox_config(name, password):
     proto    = bindings[0].get("protocol", "TCP").upper() if bindings else "TCP"
     port_range = bindings[0].get("portRange",
                  str(bindings[0].get("port", "2100"))) if bindings else "2100"
-    # Берём первый порт из диапазона для sing-box (он не поддерживает диапазоны)
     first_port = int(port_range.split("-")[0]) if "-" in port_range else int(port_range)
     server_ip  = get_server_ip()
 
@@ -554,15 +553,11 @@ def api_users_delete():
 @app.route(f"{BASE}/api/users/warp", methods=["POST"])
 @login_required
 def api_users_warp():
-    """Включить/выключить WARP для конкретного пользователя через egress.users."""
+    """Включить/выключить WARP для конкретного пользователя. При включении весь трафик идёт через WARP."""
     data    = request.get_json(silent=True) or {}
     name    = data.get("name", "")
     enabled = bool(data.get("enabled", False))
-    cfg     = load_mita_config()
 
-    # egress.userGroups не поддерживается в mita — используем workaround:
-    # храним список warp-пользователей в panel.json,
-    # добавляем их домены в egress (все остальные — DIRECT).
     pc = load_panel_config()
     warp_users = set(pc.get("warp_users", []))
     if enabled:
@@ -572,10 +567,8 @@ def api_users_warp():
     pc["warp_users"] = list(warp_users)
     Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
 
-    # Примечание: mita не поддерживает per-user egress нативно.
-    # Флаг хранится в panel.json и отображается в UI как справочная информация.
-    # Реальное разделение — через отдельные порты (см. README).
-    return jsonify({"ok": True, "note": "stored_in_panel_config"})
+    _rebuild_egress(pc)
+    return jsonify({"ok": True})
 
 @app.route(f"{BASE}/api/users/warp_status")
 @login_required
@@ -890,133 +883,59 @@ def api_warp_rules_set():
 
     return jsonify({"ok": True})
 
-def _get_geosite_data():
-    """
-    Скачивает (с кэшированием на 7 дней) единый YAML файл со всеми
-    geosite-категориями и возвращает распарсенный dict.
-    Старый способ (отдельный .txt на каждую категорию на ветке release)
-    больше не поддерживается проектом v2fly — теперь только единый
-    dlc.dat_plain.yml в latest release.
-    """
-    import urllib.request, os, time, yaml
-
-    cache_path = "/var/cache/mita-geosite.yml"
-    url = "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml"
-
-    need_download = True
-    if os.path.exists(cache_path):
-        age_days = (time.time() - os.path.getmtime(cache_path)) / 86400
-        if age_days < 7:
-            need_download = False
-
-    if need_download:
-        try:
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            req = urllib.request.Request(url, headers={"User-Agent": "mita-panel"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = resp.read()
-            with open(cache_path, "wb") as f:
-                f.write(data)
-        except Exception:
-            pass  # используем старый кэш, если есть
-
-    if not os.path.exists(cache_path):
-        return None
-
-    try:
-        with open(cache_path) as f:
-            return yaml.safe_load(f)
-    except Exception:
-        return None
-
-def _geosite_category_domains(category):
-    """Возвращает список доменов для одной geosite-категории."""
-    data = _get_geosite_data()
-    if not data:
-        return []
-    domains = []
-    cat_lower = category.lower()
-    for entry in data.get("lists", []):
-        if entry.get("name", "").lower() == cat_lower:
-            for rule in entry.get("rules", []):
-                for prefix in ("domain:", "full:"):
-                    if rule.startswith(prefix):
-                        domains.append(rule[len(prefix):])
-                        break
-                # regexp: и include: пропускаем — не прямые доменные правила
-            break
-    return domains
-
 def _rebuild_egress(pc):
     """
-    Собирает egress.rules из warp_rules всех пользователей и записывает в mita config.
-    mita не поддерживает per-user egress — правила глобальные, но мы объединяем
-    домены/IP всех пользователей у которых WARP включён.
-    Источники (geosite:/geoip:/URL) разворачиваем в реальные списки.
+    Глобальный WARP-egress:
+      - WARP вкл у пользователя БЕЗ правил → весь трафик через WARP
+      - WARP вкл ТОЛЬКО с правилами → указанные домены/IP через WARP, остальное DIRECT
+      - WARP выкл у всех → egress удаляется
     """
-    import urllib.request
-
     warp_users = set(pc.get("warp_users", []))
-    all_domains = set()
-    all_ips     = set()
-
-    GEOIP_BASE = "https://raw.githubusercontent.com/herrbischoff/country-ip-blocks/master/ipv4"
-
-    for uname, rules in pc.get("warp_rules", {}).items():
-        if uname not in warp_users:
-            continue   # пользователь не включён в WARP — пропускаем
-
-        all_domains.update(rules.get("domains", []))
-        all_ips.update(rules.get("ips", []))
-
-        for src in rules.get("sources", []):
-            src = src.strip()
-            try:
-                if src.startswith("geosite:"):
-                    cat = src[len("geosite:"):]
-                    all_domains.update(_geosite_category_domains(cat))
-                elif src.startswith("geoip:"):
-                    country = src[len("geoip:"):]
-                    url = f"{GEOIP_BASE}/{country}.cidr"
-                    lines = urllib.request.urlopen(url, timeout=10).read().decode().splitlines()
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            all_ips.add(line)
-                elif src.startswith("http"):
-                    lines = urllib.request.urlopen(src, timeout=10).read().decode().splitlines()
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            # Определяем домен или IP по наличию /
-                            if "/" in line or line.replace(".","").isdigit():
-                                all_ips.add(line)
-                            else:
-                                all_domains.add(line)
-            except Exception:
-                pass   # не критично — продолжаем без этого источника
-
     cfg = load_mita_config()
 
-    if not all_domains and not all_ips:
-        # Нет правил — убираем egress полностью
+    if not warp_users:
         cfg.pop("egress", None)
-    else:
-        domain_list = sorted(all_domains)
-        ip_list     = sorted(all_ips)
-        warp_rule   = {"action": "PROXY", "proxyNames": ["warp"]}
-        if domain_list:
-            warp_rule["domainNames"] = domain_list
-        if ip_list:
-            warp_rule["ipRanges"] = ip_list
+        save_mita_config(cfg)
+        return
 
+    warp_proxy = {
+        "name": "warp",
+        "protocol": "SOCKS5_PROXY_PROTOCOL",
+        "host": "127.0.0.1",
+        "port": WARP_PORT,
+    }
+
+    all_domains = set()
+    all_ips = set()
+    has_full_warp = False
+
+    for uname in warp_users:
+        rules = pc.get("warp_rules", {}).get(uname, {})
+        domains = rules.get("domains", [])
+        ips = rules.get("ips", [])
+        if not domains and not ips:
+            has_full_warp = True
+        all_domains.update(d for d in domains if d)
+        all_ips.update(i for i in ips if i)
+
+    if has_full_warp or (not all_domains and not all_ips):
+        # Весь трафик через WARP
         cfg["egress"] = {
-            "proxies": [{
-                "name": "warp",
-                "protocol": "SOCKS5_PROXY_PROTOCOL",
-                "host": "127.0.0.1",
-                "port": WARP_PORT,
-            }],
+            "proxies": [warp_proxy],
+            "rules": [
+                {"ipRanges": ["*"], "domainNames": ["*"],
+                 "action": "PROXY", "proxyNames": ["warp"]},
+            ],
+        }
+    else:
+        # Только указанные домены/IP через WARP
+        warp_rule = {"action": "PROXY", "proxyNames": ["warp"]}
+        if all_domains:
+            warp_rule["domainNames"] = sorted(all_domains)
+        if all_ips:
+            warp_rule["ipRanges"] = sorted(all_ips)
+        cfg["egress"] = {
+            "proxies": [warp_proxy],
             "rules": [
                 warp_rule,
                 {"ipRanges": ["*"], "domainNames": ["*"], "action": "DIRECT"},

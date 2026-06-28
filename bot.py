@@ -349,6 +349,52 @@ async def toggle_warp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "включён"
     pc["warp_users"] = list(warp_users)
     Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
+
+    # Перестроить egress
+    cfg = load_mita_config()
+    warp_users_after = set(pc.get("warp_users", []))
+    if not warp_users_after:
+        cfg.pop("egress", None)
+    else:
+        wp = {"name": "warp", "protocol": "SOCKS5_PROXY_PROTOCOL",
+              "host": "127.0.0.1", "port": 40000}
+        # Проверяем, есть ли правила у кого-то из WARP-пользователей
+        has_full = False
+        for uname in warp_users_after:
+            rules = pc.get("warp_rules", {}).get(uname, {})
+            if not rules.get("domains") and not rules.get("ips"):
+                has_full = True
+                break
+        if has_full or not any(
+            pc.get("warp_rules", {}).get(u, {}).get("domains") or
+            pc.get("warp_rules", {}).get(u, {}).get("ips")
+            for u in warp_users_after
+        ):
+            cfg["egress"] = {
+                "proxies": [wp],
+                "rules": [{"ipRanges": ["*"], "domainNames": ["*"],
+                           "action": "PROXY", "proxyNames": ["warp"]}],
+            }
+        else:
+            all_dom = set()
+            all_ip = set()
+            for uname in warp_users_after:
+                r = pc.get("warp_rules", {}).get(uname, {})
+                all_dom.update(d for d in r.get("domains", []) if d)
+                all_ip.update(i for i in r.get("ips", []) if i)
+            wr = {"action": "PROXY", "proxyNames": ["warp"]}
+            if all_dom:
+                wr["domainNames"] = sorted(all_dom)
+            if all_ip:
+                wr["ipRanges"] = sorted(all_ip)
+            cfg["egress"] = {
+                "proxies": [wp],
+                "rules": [wr, {"ipRanges": ["*"], "domainNames": ["*"], "action": "DIRECT"}],
+            }
+    Path(MITA_CONFIG).write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    subprocess.run(["mita", "apply", "config", MITA_CONFIG], capture_output=True)
+    subprocess.run(["systemctl", "restart", "mita"], capture_output=True)
+
     await query.edit_message_text(
         f"🔄 WARP для `{escape_md(name)}`: *{status}*",
         reply_markup=InlineKeyboardMarkup([
