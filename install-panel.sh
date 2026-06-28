@@ -77,10 +77,9 @@ python3 -m venv "$PANEL_DIR/venv"
 info "Установка Flask и зависимостей (может занять до минуты)..."
 
 _pip_install() {
-  # Принудительно IPv4 + таймаут 15 секунд на соединение
-  timeout 120 "$PANEL_DIR/venv/bin/pip" install \
+  PIP_RETRIES=0 timeout 30 "$PANEL_DIR/venv/bin/pip" install \
     --no-input --quiet --disable-pip-version-check \
-    --timeout 15 \
+    --timeout 5 --retries 1 \
     "$@"
 }
 

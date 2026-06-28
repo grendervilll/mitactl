@@ -75,7 +75,7 @@ fi
 
 info "Установка python-telegram-bot (может занять до минуты)..."
 _bot_pip() {
-  timeout 120 "$BOT_VENV/bin/pip" install -q --disable-pip-version-check --timeout 15 "$@"
+  PIP_RETRIES=0 timeout 30 "$BOT_VENV/bin/pip" install -q --disable-pip-version-check --timeout 5 --retries 1 "$@"
 }
 bot_pip_ok=false
 for mirror in "https://pypi.org/simple/" "https://mirrors.aliyun.com/pypi/simple/"; do

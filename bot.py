@@ -202,10 +202,18 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
         ename = escape_md(name)
         lines.append(f"{o} {ename} {w}  день: {day}  нед: {wk}  мес: {mon}")
-        user_buttons.append([
-            InlineKeyboardButton(f"📋 {name}", callback_data=f"config_{name}"),
-            InlineKeyboardButton(f"📱 Karing", callback_data=f"karing_{name}"),
-        ])
+        # Каждый пользователь — одна кнопка, открывает меню с конфигом и Karing
+        user_buttons.append([InlineKeyboardButton(
+            f"{'🟢 ' if s.get('online') else ''}{name}",
+            callback_data=f"user_{name}"
+        )])
+
+    user_buttons.extend([
+        [InlineKeyboardButton("➕ Создать", callback_data="create"),
+         InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
+        [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
+        [InlineKeyboardButton("« Назад", callback_data="main")],
+    ])
 
     user_buttons.extend([
         [InlineKeyboardButton("➕ Создать", callback_data="create"),
@@ -414,6 +422,27 @@ def _build_client_config(name, password):
 
 # ── config / Karing ──────────────────────────────────────────────────────────
 @admin_only
+async def show_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    name = query.data[len("user_"):]
+    cfg = load_mita_config()
+    user = next((u for u in cfg.get("users", []) if u["name"] == name), None)
+    if not user:
+        await query.answer("Пользователь не найден")
+        return
+    await query.edit_message_text(
+        f"👤 *{escape_md(name)}*",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 JSON-конфиг", callback_data=f"config_{name}"),
+             InlineKeyboardButton("📱 Karing", callback_data=f"karing_{name}")],
+            [InlineKeyboardButton("« К пользователям", callback_data="users")],
+            [InlineKeyboardButton("« На главную", callback_data="main")],
+        ]),
+        parse_mode="MarkdownV2"
+    )
+
+@admin_only
 async def show_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -428,9 +457,9 @@ async def show_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"📋 Конфиг `{escape_md(name)}`:\n```json\n{data[:3500]}\n```",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("« К пользователям", callback_data="users")],
             [InlineKeyboardButton("📱 Karing", callback_data=f"karing_{name}")],
-            [InlineKeyboardButton("« На главную", callback_data="main")],
+            [InlineKeyboardButton("« К пользователю", callback_data=f"user_{name}")],
+            [InlineKeyboardButton("« К списку", callback_data="users")],
         ]),
         parse_mode="MarkdownV2"
     )
@@ -466,8 +495,8 @@ async def show_karing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 JSON-конфиг", callback_data=f"config_{name}")],
-            [InlineKeyboardButton("« К пользователям", callback_data="users")],
-            [InlineKeyboardButton("« На главную", callback_data="main")],
+            [InlineKeyboardButton("« К пользователю", callback_data=f"user_{name}")],
+            [InlineKeyboardButton("« К списку", callback_data="users")],
         ]),
         parse_mode="MarkdownV2"
     )
@@ -690,6 +719,8 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await warp_menu(update, context)
     elif data.startswith("warp_"):
         return await toggle_warp(update, context)
+    elif data.startswith("user_"):
+        return await show_user_menu(update, context)
     elif data == "security":
         return await show_security(update, context)
     elif data.startswith("config_"):
