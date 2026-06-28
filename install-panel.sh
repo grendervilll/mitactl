@@ -75,10 +75,39 @@ mkdir -p "$PANEL_DIR"
 
 python3 -m venv "$PANEL_DIR/venv"
 info "Установка Flask и зависимостей (может занять до минуты)..."
-PIP_REQUIRE_VIRTUALENV=false "$PANEL_DIR/venv/bin/pip" install \
+
+_pip_install() {
+  "$PANEL_DIR/venv/bin/pip" install \
     --no-input --quiet --disable-pip-version-check \
-    flask gunicorn pyyaml psutil
-ok "Python venv, Flask и зависимости установлены"
+    "$@"
+}
+
+MIRRORS=(
+  "https://pypi.org/simple/"
+  "https://mirrors.aliyun.com/pypi/simple/"
+)
+
+pip_ok=false
+for mirror in "${MIRRORS[@]}"; do
+  if _pip_install --index-url "$mirror" flask gunicorn pyyaml psutil 2>/dev/null; then
+    pip_ok=true
+    break
+  fi
+  warn "PyPI ($mirror) недоступен, пробую дальше..."
+done
+
+if ! $pip_ok; then
+  warn "pip не смог установить зависимости. Пересоздаю venv с системными пакетами..."
+  rm -rf "$PANEL_DIR/venv"
+  python3 -m venv --system-site-packages "$PANEL_DIR/venv"
+  apt-get install -y -qq python3-flask python3-gunicorn python3-yaml python3-psutil 2>/dev/null || {
+    error "Не удалось установить Flask ни через pip, ни через apt"
+    exit 1
+  }
+  ok "Flask установлен через системные пакеты (venv с --system-site-packages)"
+else
+  ok "Python venv, Flask и зависимости установлены"
+fi
 
 # ── копирование файлов ─────────────────────────────────────────────
 section "Копирование файлов панели"

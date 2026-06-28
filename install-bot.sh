@@ -73,8 +73,25 @@ if [[ ! -d "$BOT_VENV" ]]; then
     python3 -m venv "$BOT_VENV"
 fi
 
-"$BOT_VENV/bin/pip" install -q python-telegram-bot psutil 2>/dev/null
-ok "Python-зависимости установлены в виртуальное окружение"
+info "Установка python-telegram-bot (может занять до минуты)..."
+bot_pip_ok=false
+for mirror in "https://pypi.org/simple/" "https://mirrors.aliyun.com/pypi/simple/"; do
+  if "$BOT_VENV/bin/pip" install -q --disable-pip-version-check --index-url "$mirror" python-telegram-bot psutil 2>/dev/null; then
+    bot_pip_ok=true
+    break
+  fi
+done
+
+if ! $bot_pip_ok; then
+  warn "pip не смог установить python-telegram-bot. Пробую через apt..."
+  rm -rf "$BOT_VENV"
+  python3 -m venv --system-site-packages "$BOT_VENV"
+  apt-get install -y -qq python3-telegram-bot python3-psutil 2>/dev/null || {
+    warn "Не удалось установить зависимости бота. Бот не будет работать."
+    warn "Установите вручную: pip install python-telegram-bot psutil"
+  }
+fi
+ok "Python-зависимости бота установлены"
 
 # ── копирование файлов ──────────────────────────────────────────────
 section "Установка бота"
