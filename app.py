@@ -567,7 +567,7 @@ def api_users_warp():
     pc["warp_users"] = list(warp_users)
     Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
 
-    _rebuild_egress(pc)
+    _rebuild_egress()
     return jsonify({"ok": True})
 
 @app.route(f"{BASE}/api/users/warp_status")
@@ -854,7 +854,8 @@ def api_warp_rules_get():
     rules = pc.get("warp_rules", {}).get(name, {
         "domains": [],
         "ips": [],
-        "sources": [],   # URL или geosite:/geoip: ссылки
+        "sources": [],
+        "full_warp": False,
     })
     return jsonify({"ok": True, "name": name, "rules": rules})
 
@@ -862,40 +863,40 @@ def api_warp_rules_get():
 @login_required
 def api_warp_rules_set():
     data = request.get_json(silent=True) or {}
-    name    = data.get("name", "")
-    domains = data.get("domains", [])   # список строк
-    ips     = data.get("ips", [])
-    sources = data.get("sources", [])   # geosite:xxx / geoip:xxx / URL
+    name      = data.get("name", "")
+    domains   = data.get("domains", [])
+    ips       = data.get("ips", [])
+    sources   = data.get("sources", [])
+    full_warp = data.get("full_warp", False)
 
     if not name:
         return jsonify({"ok": False, "error": "Не указано имя"}), 400
 
     pc = load_panel_config()
     pc.setdefault("warp_rules", {})[name] = {
-        "domains": [d.strip() for d in domains if d.strip()],
-        "ips":     [i.strip() for i in ips     if i.strip()],
-        "sources": [s.strip() for s in sources if s.strip()],
+        "domains":   [d.strip() for d in domains if d.strip()],
+        "ips":       [i.strip() for i in ips     if i.strip()],
+        "sources":   [s.strip() for s in sources if s.strip()],
+        "full_warp": bool(full_warp),
     }
     Path(PANEL_CONFIG).write_text(json.dumps(pc, indent=2))
 
-    # Перегенерировать egress в mita config на основе всех пользователей
-    _rebuild_egress(pc)
+    _rebuild_egress()
 
     return jsonify({"ok": True})
 
 def _rebuild_egress(pc=None):
     """
     Глобальный WARP-egress:
-      - WARP вкл у пользователя БЕЗ правил → весь трафик через WARP
-      - WARP вкл ТОЛЬКО с правилами → указанные домены/IP через WARP, остальное DIRECT
+      - full_warp=True у любого пользователя → весь трафик через WARP
+      - full_warp=False + есть правила → указанные домены/IP через WARP, остальное DIRECT
       - WARP выкл у всех → egress удаляется
-    Всегда перечитывает panel.json с диска чтобы избежать race condition.
     """
-    pc = load_panel_config()  # всегда свежая копия с диска
+    pc = load_panel_config()
     warp_users = set(pc.get("warp_users", []))
-    cfg = load_mita_config()
 
     if not warp_users:
+        cfg = load_mita_config()
         cfg.pop("egress", None)
         save_mita_config(cfg)
         return
@@ -908,20 +909,19 @@ def _rebuild_egress(pc=None):
     }
 
     all_domains = set()
-    all_ips = set()
-    has_full_warp = False
+    all_ips     = set()
+    has_full    = False
 
     for uname in warp_users:
         rules = pc.get("warp_rules", {}).get(uname, {})
-        domains = rules.get("domains", [])
-        ips = rules.get("ips", [])
-        if not domains and not ips:
-            has_full_warp = True
-        all_domains.update(d for d in domains if d)
-        all_ips.update(i for i in ips if i)
+        if rules.get("full_warp"):
+            has_full = True
+        all_domains.update(d for d in rules.get("domains", []) if d)
+        all_ips.update(i for i in rules.get("ips", []) if i)
 
-    if has_full_warp or (not all_domains and not all_ips):
-        # Весь трафик через WARP
+    cfg = load_mita_config()
+
+    if has_full:
         cfg["egress"] = {
             "proxies": [warp_proxy],
             "rules": [
@@ -929,8 +929,7 @@ def _rebuild_egress(pc=None):
                  "action": "PROXY", "proxyNames": ["warp"]},
             ],
         }
-    else:
-        # Только указанные домены/IP через WARP
+    elif all_domains or all_ips:
         warp_rule = {"action": "PROXY", "proxyNames": ["warp"]}
         if all_domains:
             warp_rule["domainNames"] = sorted(all_domains)
@@ -943,6 +942,8 @@ def _rebuild_egress(pc=None):
                 {"ipRanges": ["*"], "domainNames": ["*"], "action": "DIRECT"},
             ],
         }
+    else:
+        cfg.pop("egress", None)
 
     save_mita_config(cfg)
 

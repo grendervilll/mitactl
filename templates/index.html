@@ -773,12 +773,12 @@ async function setWarp(name,enabled){
 async function openWarpRules(name){
   // Загрузить текущие правила
   const d=await api('/api/users/warp_rules?name='+encodeURIComponent(name));
-  const r=d?.rules||{domains:[],ips:[],sources:[]};
+  const r=d?.rules||{domains:[],ips:[],sources:[],full_warp:false};
 
   const html=`
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
       <label class="toggle" style="flex-shrink:0">
-        <input type="checkbox" id="wr-full-warp" ${(!r.domains?.length && !r.ips?.length && !r.sources?.length)?'checked':''}
+        <input type="checkbox" id="wr-full-warp" ${r.full_warp?'checked':''}
           onchange="toggleFullWarp(this.checked)">
         <span class="toggle-slider"></span>
       </label>
@@ -839,7 +839,7 @@ async function saveWarpRules(name){
   const domains=fullWarp?[]:document.getElementById('wr-domains').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const ips=fullWarp?[]:document.getElementById('wr-ips').value.split('\n').map(s=>s.trim()).filter(Boolean);
 
-  const d=await api('/api/users/warp_rules','POST',{name,domains,ips,sources:[]});
+  const d=await api('/api/users/warp_rules','POST',{name,domains,ips,sources:[],full_warp:fullWarp});
   btn.disabled=false;
   btn.textContent='Сохранить и применить';
 
