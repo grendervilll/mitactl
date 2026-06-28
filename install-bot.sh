@@ -74,9 +74,12 @@ if [[ ! -d "$BOT_VENV" ]]; then
 fi
 
 info "Установка python-telegram-bot (может занять до минуты)..."
+_bot_pip() {
+  timeout 120 "$BOT_VENV/bin/pip" install -q --disable-pip-version-check --timeout 15 "$@"
+}
 bot_pip_ok=false
 for mirror in "https://pypi.org/simple/" "https://mirrors.aliyun.com/pypi/simple/"; do
-  if "$BOT_VENV/bin/pip" install -q --disable-pip-version-check --index-url "$mirror" python-telegram-bot psutil 2>/dev/null; then
+  if _bot_pip --index-url "$mirror" python-telegram-bot psutil 2>/dev/null; then
     bot_pip_ok=true
     break
   fi
@@ -86,9 +89,11 @@ if ! $bot_pip_ok; then
   warn "pip не смог установить python-telegram-bot. Пробую через apt..."
   rm -rf "$BOT_VENV"
   python3 -m venv --system-site-packages "$BOT_VENV"
-  apt-get install -y -qq python3-telegram-bot python3-psutil 2>/dev/null || {
-    warn "Не удалось установить зависимости бота. Бот не будет работать."
-    warn "Установите вручную: pip install python-telegram-bot psutil"
+  apt-get install -y -qq python3-psutil 2>/dev/null
+  apt-get install -y -qq python3-telegram-bot 2>/dev/null || \
+    "$BOT_VENV/bin/pip" install --timeout 15 --index-url https://mirrors.aliyun.com/pypi/simple/ python-telegram-bot 2>/dev/null || {
+    warn "Не удалось установить зависимости бота."
+    warn "Установите вручную: /opt/mita-bot/venv/bin/pip install python-telegram-bot psutil"
   }
 fi
 ok "Python-зависимости бота установлены"

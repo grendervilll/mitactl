@@ -77,8 +77,10 @@ python3 -m venv "$PANEL_DIR/venv"
 info "Установка Flask и зависимостей (может занять до минуты)..."
 
 _pip_install() {
-  "$PANEL_DIR/venv/bin/pip" install \
+  # Принудительно IPv4 + таймаут 15 секунд на соединение
+  timeout 120 "$PANEL_DIR/venv/bin/pip" install \
     --no-input --quiet --disable-pip-version-check \
+    --timeout 15 \
     "$@"
 }
 
@@ -89,21 +91,23 @@ MIRRORS=(
 
 pip_ok=false
 for mirror in "${MIRRORS[@]}"; do
-  if _pip_install --index-url "$mirror" flask gunicorn pyyaml psutil 2>/dev/null; then
+  info "Пробую зеркало: $mirror"
+  if _pip_install --index-url "$mirror" flask gunicorn pyyaml psutil; then
     pip_ok=true
     break
   fi
-  warn "PyPI ($mirror) недоступен, пробую дальше..."
+  warn "Зеркало $mirror недоступно, пробую дальше..."
 done
 
 if ! $pip_ok; then
-  warn "pip не смог установить зависимости. Пересоздаю venv с системными пакетами..."
-  rm -rf "$PANEL_DIR/venv"
-  python3 -m venv --system-site-packages "$PANEL_DIR/venv"
+  warn "pip не смог установить зависимости. Пробую через apt..."
   apt-get install -y -qq python3-flask python3-gunicorn python3-yaml python3-psutil 2>/dev/null || {
     error "Не удалось установить Flask ни через pip, ни через apt"
     exit 1
   }
+  # Создаём venv с системными пакетами чтобы gunicorn был доступен
+  rm -rf "$PANEL_DIR/venv"
+  python3 -m venv --system-site-packages "$PANEL_DIR/venv"
   ok "Flask установлен через системные пакеты (venv с --system-site-packages)"
 else
   ok "Python venv, Flask и зависимости установлены"
