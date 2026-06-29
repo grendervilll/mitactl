@@ -198,15 +198,20 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         w = "🟢" if name in warp_users else "⚪"
         o = "🟢" if s.get("online") else "🔴"
         day = f"{s.get('day_mb', 0):.1f} МБ" if s.get("day_mb") else "—"
-        wk = f"{s.get('week_mb', 0):.1f} МБ" if s.get("week_mb") else "—"
         mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
         ename = escape_md(name)
-        lines.append(f"{o} {ename} {w}  день: {day}  нед: {wk}  мес: {mon}")
-        # Каждый пользователь — одна кнопка, открывает меню с конфигом и Karing
+        lines.append(f"{o} {ename} {w}  д:{day}  м:{mon}")
         user_buttons.append([InlineKeyboardButton(
             f"{'🟢 ' if s.get('online') else ''}{name}",
             callback_data=f"user_{name}"
         )])
+
+    # Ограничение Telegram: 4096 символов на сообщение
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3997] + "…"
+    if len(user_buttons) > 96:
+        user_buttons = user_buttons[:96]
 
     user_buttons.extend([
         [InlineKeyboardButton("➕ Создать", callback_data="create"),
@@ -223,7 +228,7 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     await query.edit_message_text(
-        "\n".join(lines),
+        text,
         reply_markup=InlineKeyboardMarkup(user_buttons),
         parse_mode="MarkdownV2"
     )
