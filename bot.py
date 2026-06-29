@@ -198,8 +198,8 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s = stats_map.get(name, {})
             w = "🟢" if name in warp_users else "⚪"
             o = "🟢" if s.get("online") else "🔴"
-            day = f"{s.get('day_mb', 0):.1f} МБ" if s.get("day_mb") else "—"
-            mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
+            day = f"`{s.get('day_mb', 0):.1f} МБ`" if s.get("day_mb") else "—"
+            mon = f"`{s.get('month_mb', 0):.1f} МБ`" if s.get("month_mb") else "—"
             ename = escape_md(name)
             lines.append(f"{o} {ename} {w}  д:{day}  м:{mon}")
             user_buttons.append([InlineKeyboardButton(
