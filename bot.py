@@ -150,88 +150,97 @@ async def show_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    cfg = load_mita_config()
-    users = cfg.get("users", [])
-    if not users:
-        await query.edit_message_text("👤 Нет пользователей.", reply_markup=back_button())
-        return
+    try:
+        cfg = load_mita_config()
+        users = cfg.get("users", [])
+        if not users:
+            await query.edit_message_text("👤 Нет пользователей.", reply_markup=back_button())
+            return
 
-    raw = mita_cmd("get", "users")
-    pc = load_panel_config()
-    warp_users = set(pc.get("warp_users", []))
-    today = datetime.now().date()
+        raw = mita_cmd("get", "users")
+        pc = load_panel_config()
+        warp_users = set(pc.get("warp_users", []))
+        today = datetime.now().date()
 
-    stats_map = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.upper().startswith("USER"):
-            continue
-        parts = line.split()
-        if len(parts) < 8:
-            continue
+        stats_map = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.upper().startswith("USER"):
+                continue
+            parts = line.split()
+            if len(parts) < 8:
+                continue
+            try:
+                name = parts[0]
+                d1_bytes = _parse_traffic(parts[2]) + _parse_traffic(parts[3])
+                d7_bytes = _parse_traffic(parts[4]) + _parse_traffic(parts[5])
+                d30_bytes = _parse_traffic(parts[6]) + _parse_traffic(parts[7])
+                online = False
+                la_raw = parts[1]
+                if la_raw and la_raw.lower() not in ("never","-","n/a","никогда"):
+                    try:
+                        la_date = datetime.strptime(la_raw[:10], "%Y-%m-%d").date()
+                        if (today - la_date).days == 0:
+                            online = True
+                    except Exception:
+                        pass
+                stats_map[name] = {"online": online,
+                                   "day_mb": round(d1_bytes/1024/1024, 2),
+                                   "week_mb": round(d7_bytes/1024/1024, 2),
+                                   "month_mb": round(d30_bytes/1024/1024, 2)}
+            except Exception:
+                continue
+
+        lines = ["👥 *Пользователи*\n"]
+        user_buttons = []
+        for u in users:
+            name = u["name"]
+            s = stats_map.get(name, {})
+            w = "🟢" if name in warp_users else "⚪"
+            o = "🟢" if s.get("online") else "🔴"
+            day = f"{s.get('day_mb', 0):.1f} МБ" if s.get("day_mb") else "—"
+            mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
+            ename = escape_md(name)
+            lines.append(f"{o} {ename} {w}  д:{day}  м:{mon}")
+            user_buttons.append([InlineKeyboardButton(
+                f"{'🟢 ' if s.get('online') else ''}{name}",
+                callback_data=f"user_{name}"
+            )])
+
+        user_buttons.extend([
+            [InlineKeyboardButton("➕ Создать", callback_data="create"),
+             InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
+            [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
+            [InlineKeyboardButton("« Назад", callback_data="main")],
+        ])
+
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:3997] + "…"
+        if len(user_buttons) > 96:
+            user_buttons = user_buttons[:96]
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(user_buttons),
+            parse_mode="MarkdownV2"
+        )
+    except Exception as e:
+        _log.error("show_users failed: %s", e, exc_info=True)
         try:
-            name = parts[0]
-            d1_bytes = _parse_traffic(parts[2]) + _parse_traffic(parts[3])
-            d7_bytes = _parse_traffic(parts[4]) + _parse_traffic(parts[5])
-            d30_bytes = _parse_traffic(parts[6]) + _parse_traffic(parts[7])
-            online = False
-            la_raw = parts[1]
-            if la_raw and la_raw.lower() not in ("never","-","n/a","никогда"):
-                try:
-                    la_date = datetime.strptime(la_raw[:10], "%Y-%m-%d").date()
-                    if (today - la_date).days == 0:
-                        online = True
-                except Exception:
-                    pass
-            stats_map[name] = {"online": online,
-                               "day_mb": round(d1_bytes/1024/1024, 2),
-                               "week_mb": round(d7_bytes/1024/1024, 2),
-                               "month_mb": round(d30_bytes/1024/1024, 2)}
+            await query.edit_message_text(
+                f"⚠ Ошибка загрузки пользователей:\n`{e}`",
+                reply_markup=back_button(),
+                parse_mode="MarkdownV2"
+            )
         except Exception:
-            continue
-
-    lines = ["👥 *Пользователи*\n"]
-    user_buttons = []
-    for u in users:
-        name = u["name"]
-        s = stats_map.get(name, {})
-        w = "🟢" if name in warp_users else "⚪"
-        o = "🟢" if s.get("online") else "🔴"
-        day = f"{s.get('day_mb', 0):.1f} МБ" if s.get("day_mb") else "—"
-        mon = f"{s.get('month_mb', 0):.1f} МБ" if s.get("month_mb") else "—"
-        ename = escape_md(name)
-        lines.append(f"{o} {ename} {w}  д:{day}  м:{mon}")
-        user_buttons.append([InlineKeyboardButton(
-            f"{'🟢 ' if s.get('online') else ''}{name}",
-            callback_data=f"user_{name}"
-        )])
-
-    # Ограничение Telegram: 4096 символов на сообщение
-    text = "\n".join(lines)
-    if len(text) > 4000:
-        text = text[:3997] + "…"
-    if len(user_buttons) > 96:
-        user_buttons = user_buttons[:96]
-
-    user_buttons.extend([
-        [InlineKeyboardButton("➕ Создать", callback_data="create"),
-         InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
-        [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
-        [InlineKeyboardButton("« Назад", callback_data="main")],
-    ])
-
-    user_buttons.extend([
-        [InlineKeyboardButton("➕ Создать", callback_data="create"),
-         InlineKeyboardButton("🗑 Удалить", callback_data="delete_menu")],
-        [InlineKeyboardButton("🔄 WARP", callback_data="warp_menu")],
-        [InlineKeyboardButton("« Назад", callback_data="main")],
-    ])
-
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(user_buttons),
-        parse_mode="MarkdownV2"
-    )
+            pass
+    except Exception as e:
+        _log.error("show_users failed: %s", e)
+        await query.edit_message_text(
+            f"⚠ Ошибка: {e}",
+            reply_markup=back_button()
+        )
 
 # ── create ────────────────────────────────────────────────────────────────────
 @admin_only
