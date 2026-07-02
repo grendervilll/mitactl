@@ -78,32 +78,35 @@ main_menu() {
     echo -e "${NC}"
     echo -e "  ${BOLD}1.${NC}  Сменить способ подключения к панели"
     echo -e "  ${BOLD}2.${NC}  Управление портами (firewall)"
-    echo -e "  ${BOLD}3.${NC}  Перевыпустить SSL-сертификат панели"
-    echo -e "  ${BOLD}4.${NC}  Управление пользователями mita"
-    echo -e "  ${BOLD}5.${NC}  Показать логин и пароль админа панели"
-    echo -e "  ${BOLD}6.${NC}  Изменить данные администратора панели"
-    echo -e "  ${BOLD}7.${NC}  Настройка fail2ban"
-    echo -e "  ${BOLD}8.${NC}  Рекомендации по безопасности VPS"
-    echo -e "  ${RED}${BOLD}9.${NC}  ${RED}Полное удаление mita, панели и WARP${NC}"
-    echo -e "  ${BOLD}10.${NC} Показать текущую конфигурацию"
-    echo -e "  ${BOLD}11.${NC} Управление Telegram-ботом"
-    echo -e "  ${BOLD}12.${NC} ${CYAN}Обновить панель и утилиты из GitHub${NC}"
+    echo -e "  ${BOLD}3.${NC}  Сменить порт веб-панели"
+    echo -e "  ${BOLD}4.${NC}  Перевыпустить SSL-сертификат панели"
+    echo -e "  ${BOLD}4.${NC}  Перевыпустить SSL-сертификат панели"
+    echo -e "  ${BOLD}5.${NC}  Управление пользователями mita"
+    echo -e "  ${BOLD}6.${NC}  Показать логин и пароль админа панели"
+    echo -e "  ${BOLD}7.${NC}  Изменить данные администратора панели"
+    echo -e "  ${BOLD}8.${NC}  Настройка fail2ban"
+    echo -e "  ${BOLD}9.${NC}  Рекомендации по безопасности VPS"
+    echo -e "  ${RED}${BOLD}10.${NC} ${RED}Полное удаление mita, панели и WARP${NC}"
+    echo -e "  ${BOLD}11.${NC} Показать текущую конфигурацию"
+    echo -e "  ${BOLD}12.${NC} Управление Telegram-ботом"
+    echo -e "  ${BOLD}13.${NC} ${CYAN}Обновить панель и утилиты из GitHub${NC}"
     echo -e "  ${BOLD}0.${NC}  Выход"
     echo ""
     read -r -p "  Выберите пункт: " choice
     case "$choice" in
       1) menu_panel_access ;;
       2) menu_firewall ;;
-      3) menu_ssl ;;
-      4) menu_users ;;
-      5) menu_show_admin ;;
-      6) menu_change_admin ;;
-      7) menu_fail2ban ;;
-      8) menu_security ;;
-      9) menu_uninstall ;;
-      10) menu_show_config ;;
-      11) menu_bot ;;
-      12) menu_update ;;
+      3) menu_change_panel_port ;;
+      4) menu_ssl ;;
+      5) menu_users ;;
+      6) menu_show_admin ;;
+      7) menu_change_admin ;;
+      8) menu_fail2ban ;;
+      9) menu_security ;;
+      10) menu_uninstall ;;
+      11) menu_show_config ;;
+      12) menu_bot ;;
+      13) menu_update ;;
       0) exit 0 ;;
       *) warn "Неверный выбор" ;;
     esac
@@ -373,7 +376,104 @@ _fw_close() {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# 3. SSL
+# 3. СМЕНИТЬ ПОРТ ВЕБ-ПАНЕЛИ
+# ════════════════════════════════════════════════════════════════════════════
+menu_change_panel_port() {
+  section "Смена порта веб-панели"
+
+  local current_port new_port
+  current_port=$(env_value "PANEL_PORT"); current_port=${current_port:-8080}
+  local access_mode
+  access_mode=$(panel_value "access_mode")
+
+  echo -e "  Текущий порт: ${YELLOW}${current_port}${NC}"
+  if [[ "$access_mode" == "ssh" ]]; then
+    echo -e "  Режим доступа: ${YELLOW}SSH-туннель (панель на 127.0.0.1)${NC}"
+  fi
+  echo ""
+
+  while true; do
+    read -r -p "  Новый порт [${current_port}]: " new_port
+    new_port=${new_port:-$current_port}
+    if [[ "$new_port" == "$current_port" ]]; then
+      info "Порт не изменился"
+      pause
+      return
+    fi
+    if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [[ $new_port -lt 1024 || $new_port -gt 65535 ]]; then
+      warn "Порт должен быть числом от 1024 до 65535"
+      continue
+    fi
+    if ss -tlnp 2>/dev/null | grep -q ":${new_port}[[:space:]]"; then
+      warn "Порт $new_port уже занят. Выберите другой."
+      continue
+    fi
+    break
+  done
+
+  echo ""
+  info "Смена порта с $current_port на $new_port..."
+
+  # 1. Обновить panel.env
+  _update_env_val "PANEL_PORT" "$new_port"
+
+  # 2. Пересоздать start.sh с новым портом (сохраняя bind host)
+  local bind_host="0.0.0.0"
+  [[ "$access_mode" == "ssh" ]] && bind_host="127.0.0.1"
+
+  cat > /opt/mita-panel/start.sh << STARTEOF
+#!/bin/bash
+set -a; source /etc/mita/panel.env; set +a
+SSL_ARGS=""
+if [[ -n "\$SSL_CERT" && -n "\$SSL_KEY" && -f "\$SSL_CERT" && -f "\$SSL_KEY" ]]; then
+  SSL_ARGS="--certfile=\$SSL_CERT --keyfile=\$SSL_KEY"
+fi
+exec /opt/mita-panel/venv/bin/gunicorn \\
+    --bind ${bind_host}:${new_port} \\
+    --workers 2 --timeout 120 \\
+    --access-logfile /var/log/mita-panel-access.log \\
+    --error-logfile /var/log/mita-panel.log \\
+    \$SSL_ARGS app:app
+STARTEOF
+  chmod +x /opt/mita-panel/start.sh
+
+  # 3. Обновить firewall
+  if [[ "$access_mode" != "ssh" ]]; then
+    _fw_close "$current_port" "tcp"
+    _fw_open "$new_port" "tcp"
+  fi
+
+  # 4. Перезапустить панель
+  systemctl restart mita-panel 2>/dev/null || true
+  sleep 1
+
+  if systemctl is-active --quiet mita-panel; then
+    ok "Панель перезапущена на порту $new_port"
+    local proto
+    proto=$(_panel_proto)
+    local secret server_ip
+    secret=$(env_value "SECRET_PATH")
+    server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    echo ""
+    echo -e "  Новый адрес: ${BOLD}${GREEN}${proto}://${server_ip}:${new_port}/${secret}/${NC}"
+    if [[ "$access_mode" == "ssh" ]]; then
+      local ssh_port
+      ssh_port=$(panel_value "ssh_port"); ssh_port=${ssh_port:-22}
+      print_ssh_instruction "$new_port" "$secret" "$ssh_port"
+    fi
+  else
+    error "Панель не запустилась. Проверьте: journalctl -u mita-panel -n 20"
+    warn "Возвращаю старый порт $current_port..."
+    _update_env_val "PANEL_PORT" "$current_port"
+    sed -i "s/--bind ${bind_host}:${new_port}/--bind ${bind_host}:${current_port}/" /opt/mita-panel/start.sh 2>/dev/null || true
+    systemctl restart mita-panel 2>/dev/null || true
+  fi
+
+  pause
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. SSL
 # ════════════════════════════════════════════════════════════════════════════
 menu_ssl() {
   section "Перевыпуск SSL-сертификата"

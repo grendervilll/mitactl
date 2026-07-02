@@ -674,6 +674,91 @@ def api_panel_restart():
     )
     return jsonify({"ok": True})
 
+@app.route(f"{BASE}/api/panel/change-port", methods=["POST"])
+@login_required
+def api_change_panel_port():
+    data      = request.get_json(silent=True) or {}
+    new_port  = int(data.get("port", 0))
+    if new_port < 1024 or new_port > 65535:
+        return jsonify({"ok": False, "error": "Порт должен быть от 1024 до 65535"}), 400
+
+    current_port = int(os.environ.get("PANEL_PORT", "8080"))
+    if new_port == current_port:
+        return jsonify({"ok": True, "port": new_port})
+
+    # Проверить, не занят ли порт
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("0.0.0.0", new_port))
+        s.close()
+    except OSError:
+        return jsonify({"ok": False, "error": f"Порт {new_port} уже занят"}), 409
+
+    pc = load_panel_config()
+    access_mode = pc.get("access_mode", "ip")
+    bind_host = "127.0.0.1" if access_mode == "ssh" else "0.0.0.0"
+
+    # Обновить panel.env
+    env_file = "/etc/mita/panel.env"
+    try:
+        lines = Path(env_file).read_text().splitlines()
+    except Exception:
+        lines = []
+    new_lines = []
+    found = False
+    for line in lines:
+        if line.startswith("PANEL_PORT="):
+            new_lines.append(f"PANEL_PORT={new_port}")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"PANEL_PORT={new_port}")
+    Path(env_file).write_text("\n".join(new_lines) + "\n")
+
+    # Обновить start.sh
+    start_sh = "/opt/mita-panel/start.sh"
+    try:
+        Path(start_sh).write_text(f"""#!/bin/bash
+set -a; source /etc/mita/panel.env; set +a
+SSL_ARGS=""
+if [[ -n "$SSL_CERT" && -n "$SSL_KEY" && -f "$SSL_CERT" && -f "$SSL_KEY" ]]; then
+  SSL_ARGS="--certfile=$SSL_CERT --keyfile=$SSL_KEY"
+fi
+exec /opt/mita-panel/venv/bin/gunicorn \\
+    --bind {bind_host}:{new_port} \\
+    --workers 2 --timeout 120 \\
+    --access-logfile /var/log/mita-panel-access.log \\
+    --error-logfile /var/log/mita-panel.log \\
+    $SSL_ARGS app:app
+""")
+    except Exception:
+        pass
+
+    # Обновить firewall
+    if access_mode != "ssh":
+        _fw_close_port(current_port)
+        _fw_open_port(new_port)
+
+    secret = os.environ.get("SECRET_PATH", "")
+    proto = "https" if os.environ.get("SSL_CERT") else "http"
+    server_ip = get_server_ip()
+    new_url = f"{proto}://{server_ip}:{new_port}/{secret}"
+
+    # Отложенный перезапуск
+    subprocess.Popen(
+        ["bash","-c","sleep 2 && systemctl restart mita-panel"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    return jsonify({
+        "ok":        True,
+        "port":      new_port,
+        "new_url":   new_url,
+        "old_port":  current_port,
+    })
+
 @app.route(f"{BASE}/api/panel/access")
 @login_required
 def api_panel_access_get():

@@ -198,6 +198,21 @@
     </button>
     <div id="restart-result" style="margin-top:12px"></div>
   </div>
+
+  <div class="card">
+    <div class="card-title">Сменить порт панели</div>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:14px;line-height:1.6">
+      Если порт заблокирован провайдером — смените на другой. Панель перезапустится, страница попробует переподключиться.
+    </p>
+    <div class="form-row">
+      <div class="form-group" style="max-width:180px">
+        <label>Новый порт</label>
+        <input type="number" id="new-panel-port" value="" min="1024" max="65535" placeholder="8080">
+      </div>
+    </div>
+    <button class="btn btn-warn" onclick="changePanelPort()">Сменить порт</button>
+    <div id="change-port-result" style="margin-top:12px"></div>
+  </div>
 </div>
 
 <!-- SECURITY / FAIL2BAN -->
@@ -950,6 +965,31 @@ async function restartPanel(){
   }
   btn.disabled=false;
   btn.innerHTML='<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Перезапустить панель';
+}
+
+async function changePanelPort(){
+  const port=parseInt(document.getElementById('new-panel-port').value);
+  if(!port||port<1024||port>65535){showToast('Порт должен быть от 1024 до 65535',true);return;}
+  if(!confirm(`Сменить порт на ${port}? Панель перезапустится, страница попробует переподключиться.`))return;
+
+  const el=document.getElementById('change-port-result');
+  el.innerHTML='<span class="spinner"></span> Меняю порт...';
+
+  try{
+    const d=await api('/api/panel/change-port','POST',{port});
+    if(d?.ok){
+      el.innerHTML=`<div class="alert alert-ok">✓ Порт изменён на ${d.port}. Перенаправление...</div>`;
+      showToast(`Новый порт: ${d.port}`);
+      if(d.new_url){
+        // Ждём 3 секунды пока панель перезапустится и переходим на новый URL
+        setTimeout(()=>{window.location.href=d.new_url;},3000);
+      }
+    }else{
+      el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(d?.error||'')}</div>`;
+    }
+  }catch(e){
+    el.innerHTML=`<div class="alert alert-err">Ошибка: ${escH(e.message)}</div>`;
+  }
 }
 
 // ──────────────── TELEGRAM BOT ────────────────
